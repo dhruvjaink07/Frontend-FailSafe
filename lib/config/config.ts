@@ -1,0 +1,9 @@
+export const config = {
+  API_BASE: process.env.NEXT_PUBLIC_API_URL ?? "/api",
+  REQUEST_TIMEOUT_MS: Number(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT_MS ?? 12000),
+  POLL_ACTIVE_MS: Number(process.env.NEXT_PUBLIC_POLL_ACTIVE_MS ?? 2000),
+  POLL_HIDDEN_MS: Number(process.env.NEXT_PUBLIC_POLL_HIDDEN_MS ?? 7000),
+  MAX_LOG_ENTRIES: Number(process.env.NEXT_PUBLIC_MAX_LOG_ENTRIES ?? 1000),
+  MAX_METRIC_POINTS: Number(process.env.NEXT_PUBLIC_MAX_METRIC_POINTS ?? 600),
+  CHART_UPDATE_THROTTLE_MS: Number(process.env.NEXT_PUBLIC_CHART_UPDATE_THROTTLE_MS ?? 500),
+} as const

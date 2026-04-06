@@ -1,0 +1,100 @@
+import { config } from "@/lib/config/config"
+import { parseError } from "@/lib/errors/error-handler"
+import { getApiKey } from "@/lib/security/api-key-store"
+
+interface RequestOptions extends Omit<RequestInit, "signal"> {
+  timeoutMs?: number
+  dedupeKey?: string
+  signal?: AbortSignal
+}
+
+const inFlight = new Map<string, Promise<unknown>>()
+const controllers = new Map<string, AbortController>()
+
+function getRequestKey(url: string, options: RequestOptions): string {
+  const method = options.method ?? "GET"
+  const body = typeof options.body === "string" ? options.body : ""
+  return options.dedupeKey ?? `${method}:${url}:${body}`
+}
+
+function mergeSignals(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort()
+      break
+    }
+    signal.addEventListener("abort", abort, { once: true })
+  }
+  return controller.signal
+}
+
+export function cancelRequest(key: string): void {
+  controllers.get(key)?.abort()
+  controllers.delete(key)
+  inFlight.delete(key)
+}
+
+export async function requestClient<T>(url: string, options: RequestOptions = {}): Promise<T> {
+  const key = getRequestKey(url, options)
+
+  if (inFlight.has(key)) {
+    return inFlight.get(key) as Promise<T>
+  }
+
+  const timeoutController = new AbortController()
+  const requestController = new AbortController()
+  const timeoutMs = options.timeoutMs ?? config.REQUEST_TIMEOUT_MS
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs)
+  const signal = options.signal
+    ? mergeSignals([options.signal, timeoutController.signal, requestController.signal])
+    : mergeSignals([timeoutController.signal, requestController.signal])
+
+  controllers.set(key, requestController)
+
+  const task = (async () => {
+    try {
+      const apiKey = getApiKey()
+      const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData
+      const res = await fetch(url, {
+        ...options,
+        signal,
+        headers: {
+          ...(isFormData ? {} : { "Content-Type": "application/json" }),
+          ...(apiKey ? { "x-api-key": apiKey } : {}),
+          ...options.headers,
+        },
+      })
+
+      if (!res.ok) {
+        let payload: unknown = null
+        try {
+          payload = await res.json()
+        } catch {
+          payload = { message: `Request failed with status ${res.status}` }
+        }
+        throw parseError({ ...(payload as object), status: res.status })
+      }
+
+      if (res.status === 204) return null as T
+      return (await res.json()) as T
+    } catch (error) {
+      throw parseError(error)
+    } finally {
+      clearTimeout(timeout)
+      controllers.delete(key)
+      inFlight.delete(key)
+    }
+  })()
+
+  inFlight.set(key, task)
+  return task
+}
+
+export function buildApiUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path
+  const base = config.API_BASE.endsWith("/") ? config.API_BASE.slice(0, -1) : config.API_BASE
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  return `${base}${normalizedPath}`
+}
