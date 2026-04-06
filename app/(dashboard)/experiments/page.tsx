@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,6 +23,20 @@ import { getExperiments } from "@/lib/api"
 import { parseError } from "@/lib/errors/error-handler"
 
 export default function ExperimentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <ExperimentsPageContent />
+    </Suspense>
+  )
+}
+
+function ExperimentsPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [experiments, setExperiments] = useState<Experiment[]>([])

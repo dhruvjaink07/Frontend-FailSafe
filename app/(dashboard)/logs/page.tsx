@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,20 @@ import { formatClock } from "@/lib/time/time-utils"
 import { Download, Pause, Play, RefreshCw } from "lucide-react"
 
 export default function LogsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <LogsPageContent />
+    </Suspense>
+  )
+}
+
+function LogsPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
