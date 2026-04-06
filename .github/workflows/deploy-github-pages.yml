@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DEPLOY_TARGET: github-pages
-      NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+      NEXT_PUBLIC_UI_ONLY_PREVIEW: "true"
 
     steps:
       - name: Checkout

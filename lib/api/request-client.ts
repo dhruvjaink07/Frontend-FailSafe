@@ -10,6 +10,53 @@ interface RequestOptions extends Omit<RequestInit, "signal"> {
 
 const inFlight = new Map<string, Promise<unknown>>()
 const controllers = new Map<string, AbortController>()
+const uiOnlyPreview = process.env.NEXT_PUBLIC_UI_ONLY_PREVIEW === "true"
+
+function getUiPreviewFallback<T>(url: string, method: string): T | null {
+  if (method !== "GET") return null
+
+  const normalized = (() => {
+    try {
+      return new URL(url, "http://local").pathname
+    } catch {
+      return url
+    }
+  })()
+
+  if (normalized.endsWith("/api/health")) {
+    return {
+      status: "ok",
+      backend: "unconfigured",
+      mode: "ui-preview",
+    } as T
+  }
+
+  if (normalized.endsWith("/api/experiments")) {
+    return [] as T
+  }
+
+  if (normalized.endsWith("/api/containers")) {
+    return [] as T
+  }
+
+  if (normalized.endsWith("/api/logs")) {
+    return [] as T
+  }
+
+  if (normalized.endsWith("/api/auth/role")) {
+    return { role: "viewer", keyId: "ui-preview" } as T
+  }
+
+  if (normalized.endsWith("/api/metrics/system")) {
+    return {
+      blastRadius: 0,
+      cascadeDepth: 0,
+      severity: "low",
+    } as T
+  }
+
+  return null
+}
 
 function getRequestKey(url: string, options: RequestOptions): string {
   const method = options.method ?? "GET"
@@ -38,6 +85,14 @@ export function cancelRequest(key: string): void {
 
 export async function requestClient<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const key = getRequestKey(url, options)
+  const method = options.method ?? "GET"
+
+  if (uiOnlyPreview) {
+    const fallback = getUiPreviewFallback<T>(url, method)
+    if (fallback !== null) {
+      return fallback
+    }
+  }
 
   if (inFlight.has(key)) {
     return inFlight.get(key) as Promise<T>
