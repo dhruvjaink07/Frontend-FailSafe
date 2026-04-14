@@ -15,6 +15,7 @@ import {
   Search,
   Play,
   Eye,
+  Gauge,
   Trash2,
 } from "lucide-react"
 import type { Experiment, Platform, ExperimentPhase } from "@/lib/store"
@@ -163,10 +164,12 @@ function ExperimentsPageContent() {
           {/* Experiments List */}
           <Card>
             <CardHeader>
-              <CardTitle>All Experiments</CardTitle>
-              <CardDescription>
-                {filteredExperiments.length} experiment{filteredExperiments.length !== 1 ? "s" : ""} found
-              </CardDescription>
+              <div>
+                <CardTitle>All Experiments</CardTitle>
+                <CardDescription>
+                  {filteredExperiments.length} experiment{filteredExperiments.length !== 1 ? "s" : ""} found
+                </CardDescription>
+              </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
             </CardHeader>
             <CardContent>
@@ -232,12 +235,22 @@ function ExperimentsPageContent() {
                           </Button>
                         )}
                         {(experiment.phase === "completed" || experiment.phase === "failed") && (
-                          <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
-                            <Link href={`/experiments/${experiment.id}`}>
-                              <Eye className="mr-2 h-4 w-4" />
-                              View Results
-                            </Link>
-                          </Button>
+                          <>
+                            <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
+                              <Link href={`/experiments/${experiment.id}`}>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Results
+                              </Link>
+                            </Button>
+                            {experiment.platform === "backend" && (
+                              <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
+                                <Link href={`/metrics?id=${experiment.id}`}>
+                                  <Gauge className="mr-2 h-4 w-4" />
+                                  View Metrics
+                                </Link>
+                              </Button>
+                            )}
+                          </>
                         )}
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
                           <Trash2 className="h-4 w-4" />

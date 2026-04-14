@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
@@ -11,7 +12,10 @@ export async function GET() {
       method: "GET",
       signal: controller.signal,
       cache: "no-store",
-      headers: { Accept: "text/plain, application/json" },
+      headers: {
+        Accept: "text/plain, application/json",
+        "x-api-key": getForwardedApiKey(request),
+      },
     })
 
     clearTimeout(timeout)

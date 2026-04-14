@@ -18,6 +18,8 @@ import {
   XCircle,
 } from "lucide-react"
 import type { Experiment } from "@/lib/store"
+import { getExperimentHistoryDetail, getExperimentStatus } from "@/lib/api"
+import { parseError } from "@/lib/errors/error-handler"
 
 interface ExperimentPageProps {
   params: Promise<{ id: string }>
@@ -29,16 +31,40 @@ export default function ExperimentPage({ params }: ExperimentPageProps) {
   const [experiment, setExperiment] = useState<Experiment | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const mapHistoryToExperiment = (item: Awaited<ReturnType<typeof getExperimentHistoryDetail>>): Experiment => ({
+    id: item.experiment.id,
+    name: `${item.experiment.target_type.toUpperCase()} ${item.experiment.id.slice(0, 8)}`,
+    platform: item.experiment.target_type,
+    faultType: item.experiment.fault_type as Experiment["faultType"],
+    targets: [],
+    duration: 0,
+    adaptive: true,
+    stepIntensity: 10,
+    maxIntensity: 100,
+    currentIntensity: 0,
+    phase: (item.experiment.phase as Experiment["phase"]) || "baseline",
+    createdAt: item.experiment.created_at,
+    startedAt: item.experiment.created_at,
+    completedAt: item.experiment.state === "completed" || item.experiment.state === "failed" ? item.experiment.updated_at : undefined,
+  })
+
   useEffect(() => {
     async function fetchExperiment() {
       try {
-        const res = await fetch(`/api/experiments/${id}`)
-        if (res.ok) {
-          const data = await res.json()
-          setExperiment(data)
-        }
+        const data = await getExperimentStatus(id)
+        setExperiment(data)
       } catch (error) {
-        console.error("Failed to fetch experiment:", error)
+        const parsed = parseError(error)
+        if (parsed.status === 404) {
+          try {
+            const historical = await getExperimentHistoryDetail(id)
+            setExperiment(mapHistoryToExperiment(historical))
+          } catch (fallbackError) {
+            console.error("Failed to fetch experiment from status and history:", fallbackError)
+          }
+        } else {
+          console.error("Failed to fetch experiment:", error)
+        }
       } finally {
         setLoading(false)
       }

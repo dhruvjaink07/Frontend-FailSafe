@@ -50,20 +50,38 @@ export function normalizeExperiment(raw: UnknownRecord): Experiment & {
 }
 
 export function normalizeSystemMetrics(raw: UnknownRecord): SystemMetrics {
+  const severityRaw = asString(raw.severity, "unknown").toLowerCase()
+  const severity: SystemMetrics["severity"] =
+    severityRaw === "low" ||
+    severityRaw === "medium" ||
+    severityRaw === "high" ||
+    severityRaw === "critical" ||
+    severityRaw === "isolated"
+      ? severityRaw
+      : "unknown"
+
   return {
     blastRadius: asNumber(raw.blastRadius ?? raw.blast_radius),
     cascadeDepth: asNumber(raw.cascadeDepth ?? raw.cascade_depth),
-    severity: (asString(raw.severity, "low") as SystemMetrics["severity"]),
+    severity,
   }
 }
 
 export function normalizeEndpointMetrics(raw: UnknownRecord): EndpointMetrics {
   return {
     endpoint: asString(raw.endpoint ?? raw.name),
+    requestsTotal: asNumber(raw.requestsTotal ?? raw.requests_total),
+    latencyP50: asNumber(raw.latencyP50 ?? raw.latency_p50 ?? raw.latency?.["p50_ms"]),
     latencyAvg: asNumber(raw.latencyAvg ?? raw.latency_avg ?? raw.latency?.["avg_ms"]),
     latencyP95: asNumber(raw.latencyP95 ?? raw.latency_p95 ?? raw.latency?.["p95_ms"]),
     latencyP99: asNumber(raw.latencyP99 ?? raw.latency_p99 ?? raw.latency?.["p99_ms"]),
+    jitterMs: asNumber(raw.jitterMs ?? raw.jitter_ms ?? raw.latency?.["jitter_ms"]),
+    stddevMs: asNumber(raw.stddevMs ?? raw.stddev_ms ?? raw.latency?.["stddev_ms"]),
+    errorTotal: asNumber(raw.errorTotal ?? raw.error_total ?? raw.errors?.["total"]),
+    maxFailureStreak: asNumber(raw.maxFailureStreak ?? raw.max_failure_streak ?? raw.errors?.["max_failure_streak"]),
     errorRate: asNumber(raw.errorRate ?? raw.error_rate ?? raw.errors?.["rate_percent"]),
+    impactOrder: asNumber(raw.impactOrder ?? raw.impact_order),
+    stabilityScore: asNumber(raw.stabilityScore ?? raw.stability_score),
     cpu: asNumber(raw.cpu),
     memory: asNumber(raw.memory),
     degraded: Boolean(raw.degraded),

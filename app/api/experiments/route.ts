@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
 
@@ -21,9 +22,15 @@ async function forwardToBackend(path: string, init?: RequestInit) {
   })
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${BACKEND_BASE_URL}/experiments`, { cache: "no-store" })
+    const apiKey = getForwardedApiKey(request)
+    const response = await fetch(`${BACKEND_BASE_URL}/experiments`, {
+      cache: "no-store",
+      headers: {
+        "x-api-key": apiKey,
+      },
+    })
     if (response.status === 404) {
       return NextResponse.json([])
     }
@@ -41,15 +48,15 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const apiKey = getForwardedApiKey(request)
     const body = await request.text()
-    const apiKey = request.headers.get("x-api-key")
 
     return await forwardToBackend("/experiments", {
       method: "POST",
       body,
       headers: {
         "content-type": "application/json",
-        ...(apiKey ? { "x-api-key": apiKey } : {}),
+        "x-api-key": apiKey,
       },
     })
   } catch {

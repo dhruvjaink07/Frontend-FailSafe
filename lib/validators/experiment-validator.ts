@@ -21,6 +21,8 @@ const frontendExperimentSchema = commonExperimentSchema.extend({
     baseUrl: z.string().url("Base URL must be a valid URL"),
     metricsEndpoint: z.string().url("Metrics endpoint must be a valid URL"),
     targetUrls: z.array(z.string().min(1)).min(1, "At least one target URL is required"),
+    headless: z.boolean().optional(),
+    browser: z.string().min(1).optional(),
   }),
 })
 

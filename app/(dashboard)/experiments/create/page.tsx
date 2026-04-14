@@ -10,13 +10,12 @@ import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { PermissionGuard } from "@/components/core/permission-guard"
+import { Textarea } from "@/components/ui/textarea"
 import { Topbar } from "@/components/topbar"
 import { features } from "@/lib/config/features"
 import { saveLastExperimentConfig } from "@/lib/storage/session-cache"
 import { validateExperimentForm } from "@/lib/validators/experiment-validator"
 import {
-  getSessionRole,
   startAndroidExperiment,
   startBackendExperiment,
   startFrontendExperiment,
@@ -59,10 +58,99 @@ const faultTypeSets: Record<Platform, { value: FaultType; label: string; descrip
   ],
 }
 
+type RequestMode = "form" | "json"
+
+function buildRequestTemplate(values: {
+  name: string
+  platform: Platform
+  faultType: FaultType
+  targets: string[]
+  duration: number
+  adaptive: boolean
+  stepIntensity: number
+  maxIntensity: number
+  notCrash: boolean
+  shouldRecover: boolean
+  frontendBaseUrl: string
+  frontendMetricsEndpoint: string
+  frontendTargetUrl: string
+  frontendOpenPlaywrightWindow: boolean
+  frontendBrowserProject: string
+  backendObservedEndpoints: string
+  androidApkId: string
+  androidAvdName: string
+  androidHeadless: boolean
+  androidResetAppState: boolean
+}) {
+  const frontendTargets = values.frontendTargetUrl
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  const base = {
+    name: values.name || "API Latency Test",
+    platform: values.platform,
+    faultType: values.faultType,
+    targets: values.targets,
+    duration: values.duration,
+    adaptive: values.adaptive,
+    stepIntensity: values.stepIntensity,
+    maxIntensity: values.maxIntensity,
+    expectedBehavior: {
+      notCrash: values.notCrash,
+      shouldRecover: values.shouldRecover,
+    },
+  }
+
+  if (values.platform === "frontend") {
+    return JSON.stringify(
+      {
+        ...base,
+        targets: frontendTargets,
+        frontendRun: {
+          baseUrl: values.frontendBaseUrl,
+          metricsEndpoint: values.frontendMetricsEndpoint,
+          targetUrls: frontendTargets,
+          headless: !values.frontendOpenPlaywrightWindow,
+          browser: values.frontendBrowserProject,
+        },
+      },
+      null,
+      2,
+    )
+  }
+
+  if (values.platform === "backend") {
+    return JSON.stringify(
+      {
+        ...base,
+        observedEndpoints: values.backendObservedEndpoints.split(",").map((item) => item.trim()).filter(Boolean),
+      },
+      null,
+      2,
+    )
+  }
+
+  return JSON.stringify(
+    {
+      ...base,
+      apk: values.androidApkId,
+      androidRun: {
+        avdName: values.androidAvdName,
+        headless: values.androidHeadless,
+        resetAppState: values.androidResetAppState,
+      },
+    },
+    null,
+    2,
+  )
+}
+
 export default function CreateExperimentPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [requestMode, setRequestMode] = useState<RequestMode>("form")
   const [platform, setPlatform] = useState<Platform>("backend")
   const [faultType, setFaultType] = useState<FaultType>("latency")
   const [name, setName] = useState("")
@@ -77,6 +165,8 @@ export default function CreateExperimentPage() {
   const [frontendBaseUrl, setFrontendBaseUrl] = useState("https://example.com")
   const [frontendTargetUrl, setFrontendTargetUrl] = useState("/")
   const [frontendMetricsEndpoint, setFrontendMetricsEndpoint] = useState("http://localhost:8000/frontend/metrics")
+  const [frontendOpenPlaywrightWindow, setFrontendOpenPlaywrightWindow] = useState(true)
+  const [frontendBrowserProject, setFrontendBrowserProject] = useState("chromium")
   const [backendObservedEndpoints, setBackendObservedEndpoints] = useState("http://svc-a,http://svc-b,http://svc-c")
   const [androidApkId, setAndroidApkId] = useState("")
   const [androidAvdName, setAndroidAvdName] = useState("Pixel_8a")
@@ -84,20 +174,13 @@ export default function CreateExperimentPage() {
   const [androidResetAppState, setAndroidResetAppState] = useState(true)
   const [androidUploading, setAndroidUploading] = useState(false)
   const [androidUploadLabel, setAndroidUploadLabel] = useState<string | null>(null)
+  const [rawRequestJson, setRawRequestJson] = useState("")
   const androidFileInputRef = useRef<HTMLInputElement | null>(null)
-  const sessionRole = useAppStore((state) => state.currentRole)
-  const setSessionRole = useAppStore((state) => state.setCurrentRole)
   const backendContainers = useAppStore((state) => state.backendContainers ?? [])
   const backendContainersStatus = useAppStore((state) => state.backendContainersStatus)
   const backendContainersError = useAppStore((state) => state.backendContainersError)
+  const backendContainersUnavailable = useAppStore((state) => state.backendContainersUnavailable)
   const loadBackendContainers = useAppStore((state) => state.loadBackendContainers)
-
-  useEffect(() => {
-    if (sessionRole) return
-    getSessionRole()
-      .then((session) => setSessionRole(session.role))
-      .catch(() => setSessionRole("viewer"))
-  }, [sessionRole, setSessionRole])
 
   useEffect(() => {
     if (platform !== "backend") return
@@ -108,8 +191,14 @@ export default function CreateExperimentPage() {
   }, [platform, loadBackendContainers])
 
   const faultTypes = useMemo(() => faultTypeSets[platform], [platform])
+  const isFrontendFlow = platform === "frontend"
   const selectedBackendContainerNames = new Set(targets)
   const availableBackendContainers = backendContainers.filter((container) => container.status === "running")
+  const frontendTargetUrls = useMemo(
+    () => frontendTargetUrl.split(",").map((item) => item.trim()).filter(Boolean),
+    [frontendTargetUrl],
+  )
+  const formTargets = platform === "frontend" ? frontendTargetUrls : targets
 
   const addTarget = () => {
     if (targetInput.trim() && !targets.includes(targetInput.trim())) {
@@ -136,6 +225,59 @@ export default function CreateExperimentPage() {
 
   const clearBackendTargets = () => setTargets([])
 
+  const requestTemplate = useMemo(
+    () =>
+      buildRequestTemplate({
+        name,
+        platform,
+        faultType,
+        targets,
+        duration,
+        adaptive,
+        stepIntensity,
+        maxIntensity,
+        notCrash,
+        shouldRecover,
+        frontendBaseUrl,
+        frontendMetricsEndpoint,
+        frontendTargetUrl,
+        frontendOpenPlaywrightWindow,
+        frontendBrowserProject,
+        backendObservedEndpoints,
+        androidApkId,
+        androidAvdName,
+        androidHeadless,
+        androidResetAppState,
+      }),
+    [
+      name,
+      platform,
+      faultType,
+      targets,
+      duration,
+      adaptive,
+      stepIntensity,
+      maxIntensity,
+      notCrash,
+      shouldRecover,
+      frontendBaseUrl,
+      frontendMetricsEndpoint,
+      frontendTargetUrl,
+      frontendOpenPlaywrightWindow,
+      frontendBrowserProject,
+      backendObservedEndpoints,
+      androidApkId,
+      androidAvdName,
+      androidHeadless,
+      androidResetAppState,
+    ],
+  )
+
+  useEffect(() => {
+    if (requestMode !== "json" || rawRequestJson.trim()) return
+    setRawRequestJson(requestTemplate)
+  }, [requestMode, rawRequestJson, requestTemplate])
+
   const handleAndroidApkUpload = async () => {
     const file = androidFileInputRef.current?.files?.[0]
     if (!file) {
@@ -160,107 +302,127 @@ export default function CreateExperimentPage() {
   }
 
   const handleSubmit = async () => {
-    const commonPayload = {
-      name,
-      platform,
-      faultType,
-      targets,
-      duration,
-      adaptive,
-      stepIntensity,
-      maxIntensity,
-      expectedBehavior: {
-        notCrash,
-        shouldRecover,
-      },
-    }
-
-    const payload =
-      platform === "frontend"
-        ? {
-            ...commonPayload,
-            frontendRun: {
-              baseUrl: frontendBaseUrl,
-              metricsEndpoint: frontendMetricsEndpoint,
-              targetUrls: frontendTargetUrl
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean),
-            },
-          }
-        : platform === "backend"
-          ? {
-              ...commonPayload,
-              observedEndpoints: backendObservedEndpoints
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean),
-            }
-          : {
-              ...commonPayload,
-              apk: androidApkId,
-              androidRun: {
-                avdName: androidAvdName,
-                headless: androidHeadless,
-                resetAppState: androidResetAppState,
-              },
-            }
-
-    const validation = validateExperimentForm(payload)
-    if (!validation.success) {
-      setError(validation.error.issues[0]?.message ?? "Invalid experiment configuration")
-      return
-    }
-
     setLoading(true)
     setError(null)
     try {
-      saveLastExperimentConfig(payload)
-      const experiment =
-        platform === "frontend"
-          ? await startFrontendExperiment({
-              fault_type: faultType as "latency" | "error" | "network",
-              targets,
-              target_type: "frontend",
-              duration_seconds: duration,
-              frontend_run: {
-                base_url: frontendBaseUrl,
-                metrics_endpoint: frontendMetricsEndpoint,
-                target_urls: frontendTargetUrl.split(",").map((item) => item.trim()).filter(Boolean),
-              },
-            })
-          : platform === "backend"
-            ? await startBackendExperiment({
-                faultType: faultType as "kill" | "network_delay" | "packet_loss" | "cpu_stress" | "memory_stress",
-                targets,
-                targetType: "docker",
-                observationType: "http",
-                observedEndpoints: backendObservedEndpoints.split(",").map((item) => item.trim()).filter(Boolean),
+      const experiment = await (
+        requestMode === "json"
+          ? (() => {
+              const parsed = JSON.parse(rawRequestJson) as unknown
+              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                throw new Error("Request JSON must be an object")
+              }
+
+              return platform === "frontend"
+                ? startFrontendExperiment(parsed as unknown as Parameters<typeof startFrontendExperiment>[0])
+                : platform === "backend"
+                  ? startBackendExperiment(parsed as unknown as Parameters<typeof startBackendExperiment>[0])
+                  : startAndroidExperiment(parsed as unknown as Parameters<typeof startAndroidExperiment>[0])
+            })()
+          : (() => {
+              const commonPayload = {
+                name,
+                platform,
+                faultType,
+                targets: formTargets,
                 duration,
                 adaptive,
                 stepIntensity,
                 maxIntensity,
-                expected: { running: true },
-              })
-            : await startAndroidExperiment({
-                fault_type: faultType as "kill_app" | "network_disable" | "network_latency" | "revoke_camera" | "revoke_location" | "battery_drain",
-                targets,
-                target_type: "android",
-                observation_type: "android",
-                duration_seconds: duration,
-                apk: androidApkId,
-                android_run: {
-                  avd_name: androidAvdName,
-                  headless: androidHeadless,
-                  reset_app_state: androidResetAppState,
+                expectedBehavior: {
+                  notCrash,
+                  shouldRecover,
                 },
-                expected: {
-                  running: true,
-                  not_crash: notCrash,
-                  not_anr: true,
-                  should_recover: shouldRecover,
-                },
-              })
+              }
+
+              const payload =
+                platform === "frontend"
+                  ? {
+                      ...commonPayload,
+                      frontendRun: {
+                        baseUrl: frontendBaseUrl,
+                        metricsEndpoint: frontendMetricsEndpoint,
+                        targetUrls: frontendTargetUrl
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                        headless: !frontendOpenPlaywrightWindow,
+                        browser: frontendBrowserProject,
+                      },
+                    }
+                  : platform === "backend"
+                    ? {
+                        ...commonPayload,
+                        observedEndpoints: backendObservedEndpoints
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      }
+                    : {
+                        ...commonPayload,
+                        apk: androidApkId,
+                        androidRun: {
+                          avdName: androidAvdName,
+                          headless: androidHeadless,
+                          resetAppState: androidResetAppState,
+                        },
+                      }
+
+              const validation = validateExperimentForm(payload)
+              if (!validation.success) {
+                throw new Error(validation.error.issues[0]?.message ?? "Invalid experiment configuration")
+              }
+
+              saveLastExperimentConfig(payload)
+
+              return platform === "frontend"
+                ? startFrontendExperiment({
+                    fault_type: faultType as "latency" | "error" | "network",
+                    targets: formTargets,
+                    target_type: "frontend",
+                    duration_seconds: duration,
+                    frontend_run: {
+                      base_url: frontendBaseUrl,
+                      metrics_endpoint: frontendMetricsEndpoint,
+                      target_urls: frontendTargetUrls,
+                      headless: !frontendOpenPlaywrightWindow,
+                      browser: frontendBrowserProject,
+                    },
+                  })
+                : platform === "backend"
+                  ? startBackendExperiment({
+                      faultType: faultType as "kill" | "network_delay" | "packet_loss" | "cpu_stress" | "memory_stress",
+                      targets,
+                      targetType: "docker",
+                      observationType: "http",
+                      observedEndpoints: backendObservedEndpoints.split(",").map((item) => item.trim()).filter(Boolean),
+                      duration,
+                      adaptive,
+                      stepIntensity,
+                      maxIntensity,
+                      expected: { running: true },
+                    })
+                  : startAndroidExperiment({
+                      fault_type: faultType as "kill_app" | "network_disable" | "network_latency" | "revoke_camera" | "revoke_location" | "battery_drain",
+                      targets,
+                      target_type: "android",
+                      observation_type: "android",
+                      duration_seconds: duration,
+                      apk: androidApkId,
+                      android_run: {
+                        avd_name: androidAvdName,
+                        headless: androidHeadless,
+                        reset_app_state: androidResetAppState,
+                      },
+                      expected: {
+                        running: true,
+                        not_crash: notCrash,
+                        not_anr: true,
+                        should_recover: shouldRecover,
+                      },
+                    })
+            })()
+      )
 
       router.push(`/experiments/${experiment.id}/live?platform=${platform}`)
     } catch (error) {
@@ -274,12 +436,12 @@ export default function CreateExperimentPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Topbar 
-        title="Create Experiment" 
-        description="Configure a new fault injection test"
+        title={isFrontendFlow ? "Create Frontend Test Run" : "Create Experiment"}
+        description={isFrontendFlow ? "Define scenario, pages, browser mode, and frontend metrics source" : "Configure a new fault injection test"}
       />
       
       <div className="flex-1 px-4 py-4 sm:px-6 sm:py-6">
-        <div className="mx-auto max-w-4xl space-y-6">
+        <div className="mx-auto max-w-5xl space-y-6">
           {/* Platform Selection */}
           <Card>
             <CardHeader>
@@ -315,315 +477,447 @@ export default function CreateExperimentPage() {
 
           {/* Experiment Details */}
           <Card>
-            <CardHeader>
-              <CardTitle>Experiment Details</CardTitle>
-              <CardDescription>Basic information about the experiment</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {isFrontendFlow && <Badge variant="outline">1</Badge>}
+                  {isFrontendFlow ? "Frontend Test Plan" : "Experiment Details"}
+                </CardTitle>
+                <CardDescription>
+                  {isFrontendFlow
+                    ? "Set up scenario name and user-facing pages, or switch to raw payload mode."
+                    : "Switch between the guided form and a raw JSON request body."}
+                </CardDescription>
+              </div>
+              <Tabs value={requestMode} onValueChange={(value) => setRequestMode(value as RequestMode)}>
+                <TabsList>
+                  <TabsTrigger value="form">Form</TabsTrigger>
+                  <TabsTrigger value="json">Raw JSON</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-4">
-                <Label htmlFor="name">Experiment Name</Label>
-                <Input
-                  id="name"
-                  placeholder="e.g., API Latency Test"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Targets</Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    placeholder="e.g., /api/users"
-                    value={targetInput}
-                    onChange={(e) => setTargetInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTarget())}
+              {requestMode === "json" ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Paste the exact start payload. The selected platform decides which backend start endpoint receives it.
+                  </div>
+                  <Textarea
+                    value={rawRequestJson}
+                    onChange={(event) => setRawRequestJson(event.target.value)}
+                    className="min-h-[420px] font-mono text-xs"
+                    placeholder={requestTemplate}
                   />
-                  <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={addTarget}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="outline" onClick={() => setRawRequestJson(requestTemplate)}>
+                      Load current form as JSON
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setRawRequestJson("")}>Clear</Button>
+                  </div>
                 </div>
-                {targets.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {targets.map((target) => (
-                      <Badge key={target} variant="secondary" className="gap-1">
-                        <Target className="h-3 w-3" />
-                        {target}
-                        <button onClick={() => removeTarget(target)} className="ml-1 hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {platform === "backend" && (
-                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">Available Containers</p>
-                      <p className="text-sm text-muted-foreground">
-                        Select running containers to target this backend experiment.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button type="button" variant="outline" size="sm" onClick={selectAllBackendTargets} disabled={backendContainersStatus === "loading" || availableBackendContainers.length === 0}>
-                        Select All Running
-                      </Button>
-                      <Button type="button" variant="ghost" size="sm" onClick={clearBackendTargets} disabled={targets.length === 0}>
-                        Clear
-                      </Button>
-                    </div>
-                  </div>
-
-                  {backendContainersStatus === "loading" ? (
-                    <div className="flex items-center justify-center py-6">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                    </div>
-                  ) : backendContainersError ? (
-                    <p className="text-sm text-destructive">{backendContainersError}</p>
-                  ) : availableBackendContainers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No running containers available.</p>
-                  ) : (
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {availableBackendContainers.map((container) => {
-                        const selected = selectedBackendContainerNames.has(container.name)
-                        return (
-                          <button
-                            key={container.id}
-                            type="button"
-                            onClick={() => toggleBackendTarget(container)}
-                            className={`flex items-start justify-between rounded-md border p-3 text-left transition-colors ${
-                              selected ? "border-primary bg-primary/10" : "border-border bg-background hover:border-primary/50"
-                            }`}
-                          >
-                            <div className="space-y-1">
-                              <p className="font-medium">{container.name}</p>
-                              <p className="text-xs text-muted-foreground">{container.image}</p>
-                              <p className="text-xs text-muted-foreground">{container.ports.join(", ") || "No exposed ports"}</p>
+              ) : (
+                    <div className="space-y-4">
+                      <div className="space-y-4">
+                        <Label htmlFor="name">{isFrontendFlow ? "Scenario Name" : "Experiment Name"}</Label>
+                        <Input
+                          id="name"
+                          placeholder={isFrontendFlow ? "e.g., Checkout Flow Latency Test" : "e.g., API Latency Test"}
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </div>
+                      {platform === "frontend" ? (
+                        <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-4">
+                          <Label htmlFor="frontend-target-url">Pages and Flows Under Test</Label>
+                          <Input
+                            id="frontend-target-url"
+                            value={frontendTargetUrl}
+                            onChange={(e) => setFrontendTargetUrl(e.target.value)}
+                            placeholder="/,/checkout,/pricing"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Comma-separated paths or URLs the frontend runner should navigate.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Label>Targets</Label>
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              placeholder="e.g., /api/users"
+                              value={targetInput}
+                              onChange={(e) => setTargetInput(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTarget())}
+                            />
+                            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={addTarget}>
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {targets.length > 0 && (
+                            <div className="flex flex-wrap gap-2 pt-2">
+                              {targets.map((target) => (
+                                <Badge key={target} variant="secondary" className="gap-1">
+                                  <Target className="h-3 w-3" />
+                                  {target}
+                                  <button onClick={() => removeTarget(target)} className="ml-1 hover:text-destructive">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </Badge>
+                              ))}
                             </div>
-                            <Badge variant="outline" className={selected ? "border-primary text-primary" : ""}>
-                              {selected ? "Selected" : "Add"}
-                            </Badge>
-                          </button>
-                        )
-                      })}
+                          )}
+                        </div>
+                      )}
+
+                      {platform === "backend" && (
+                        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="font-medium">Available Containers</p>
+                              <p className="text-sm text-muted-foreground">
+                                Select running containers to target this backend experiment.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button type="button" variant="outline" size="sm" onClick={selectAllBackendTargets} disabled={backendContainersStatus === "loading" || availableBackendContainers.length === 0}>
+                                Select All Running
+                              </Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={clearBackendTargets} disabled={targets.length === 0}>
+                                Clear
+                              </Button>
+                            </div>
+                          </div>
+
+                          {backendContainersStatus === "loading" ? (
+                            <div className="flex items-center justify-center py-6">
+                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                            </div>
+                          ) : backendContainersUnavailable ? (
+                            <div className="rounded-md border border-dashed border-warning/40 bg-warning/5 px-3 py-2 text-sm text-warning">
+                              Backend containers are temporarily unavailable. You can still configure the experiment, but no live container list is shown.
+                            </div>
+                          ) : backendContainersError ? (
+                            <p className="text-sm text-destructive">{backendContainersError}</p>
+                          ) : availableBackendContainers.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No running containers available.</p>
+                          ) : (
+                            <div className="grid gap-2 md:grid-cols-2">
+                              {availableBackendContainers.map((container) => {
+                                const selected = selectedBackendContainerNames.has(container.name)
+                                return (
+                                  <button
+                                    key={container.id}
+                                    type="button"
+                                    onClick={() => toggleBackendTarget(container)}
+                                    className={`flex items-start justify-between rounded-md border p-3 text-left transition-colors ${
+                                      selected ? "border-primary bg-primary/10" : "border-border bg-background hover:border-primary/50"
+                                    }`}
+                                  >
+                                    <div className="space-y-1">
+                                      <p className="font-medium">{container.name}</p>
+                                      <p className="text-xs text-muted-foreground">{container.image}</p>
+                                      <p className="text-xs text-muted-foreground">{container.ports.join(", ") || "No exposed ports"}</p>
+                                    </div>
+                                    <Badge variant="outline" className={selected ? "border-primary text-primary" : ""}>
+                                      {selected ? "Selected" : "Add"}
+                                    </Badge>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {requestMode === "form" && (
+            <>
+              {/* Fault Configuration */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    {isFrontendFlow && <Badge variant="outline">2-4</Badge>}
+                    {isFrontendFlow ? "Runner and Injection Profile" : "Fault Configuration"}
+                  </CardTitle>
+                  <CardDescription>
+                    {isFrontendFlow ? "Choose scenario profile, browser execution mode, and metrics wiring" : "Configure the type and intensity of the fault"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {!isFrontendFlow && (
+                    <Tabs value={faultType} onValueChange={(v) => setFaultType(v as FaultType)}>
+                      <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
+                        {faultTypes.map((ft) => (
+                          <TabsTrigger key={ft.value} value={ft.value} className="whitespace-normal px-2 py-2 text-xs sm:text-sm">
+                            {ft.label}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                      {faultTypes.map((ft) => (
+                        <TabsContent key={ft.value} value={ft.value}>
+                          <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-4">
+                            <Zap className="h-5 w-5 text-primary" />
+                            <div>
+                              <p className="font-medium">{isFrontendFlow ? `${ft.label} Profile` : `${ft.label} Fault`}</p>
+                              <p className="text-sm text-muted-foreground">{ft.description}</p>
+                            </div>
+                          </div>
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  )}
+
+                  {platform === "frontend" && (
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-border bg-muted/20 p-4">
+                        <div className="mb-2 flex items-center gap-2">
+                          <Badge variant="outline">2</Badge>
+                          <p className="text-sm font-medium">Browser Mode</p>
+                        </div>
+                        <p className="mb-3 text-xs text-muted-foreground">Choose how the runner launches and which engine to use.</p>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                            <div>
+                              <p className="font-medium">Run with Browser Window</p>
+                              <p className="text-sm text-muted-foreground">Turn off headless mode for visual frontend run verification.</p>
+                            </div>
+                            <Switch checked={frontendOpenPlaywrightWindow} onCheckedChange={setFrontendOpenPlaywrightWindow} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="frontend-browser-project">Browser Engine</Label>
+                            <Input
+                              id="frontend-browser-project"
+                              value={frontendBrowserProject}
+                              onChange={(e) => setFrontendBrowserProject(e.target.value)}
+                              placeholder="chromium"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-muted/20 p-4">
+                        <div className="mb-2 flex items-center gap-2">
+                          <Badge variant="outline">3</Badge>
+                          <p className="text-sm font-medium">Injection Profile</p>
+                        </div>
+                        <p className="mb-3 text-xs text-muted-foreground">Select the fault profile and intensity behavior for this run.</p>
+                        <Tabs value={faultType} onValueChange={(v) => setFaultType(v as FaultType)}>
+                          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
+                            {faultTypes.map((ft) => (
+                              <TabsTrigger key={ft.value} value={ft.value} className="whitespace-normal px-2 py-2 text-xs sm:text-sm">
+                                {ft.label}
+                              </TabsTrigger>
+                            ))}
+                          </TabsList>
+                          {faultTypes.map((ft) => (
+                            <TabsContent key={ft.value} value={ft.value}>
+                              <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-4">
+                                <Zap className="h-5 w-5 text-primary" />
+                                <div>
+                                  <p className="font-medium">{`${ft.label} Profile`}</p>
+                                  <p className="text-sm text-muted-foreground">{ft.description}</p>
+                                </div>
+                              </div>
+                            </TabsContent>
+                          ))}
+                        </Tabs>
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-muted/20 p-4">
+                        <div className="mb-2 flex items-center gap-2">
+                          <Badge variant="outline">4</Badge>
+                          <p className="text-sm font-medium">Metrics Source</p>
+                        </div>
+                        <p className="mb-3 text-xs text-muted-foreground">Provide app and telemetry endpoints used for run scoring.</p>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="frontend-base-url">Application Base URL</Label>
+                            <Input id="frontend-base-url" value={frontendBaseUrl} onChange={(e) => setFrontendBaseUrl(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="frontend-metrics-endpoint">Metrics Source Endpoint</Label>
+                            <Input id="frontend-metrics-endpoint" value={frontendMetricsEndpoint} onChange={(e) => setFrontendMetricsEndpoint(e.target.value)} />
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Metrics source is used to validate frontend behavior during and after injection.</p>
                     </div>
                   )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Fault Configuration */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Fault Configuration</CardTitle>
-              <CardDescription>Configure the type and intensity of the fault</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <Tabs value={faultType} onValueChange={(v) => setFaultType(v as FaultType)}>
-                <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
-                  {faultTypes.map((ft) => (
-                    <TabsTrigger key={ft.value} value={ft.value} className="whitespace-normal px-2 py-2 text-xs sm:text-sm">
-                      {ft.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {faultTypes.map((ft) => (
-                  <TabsContent key={ft.value} value={ft.value}>
-                    <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-4">
-                      <Zap className="h-5 w-5 text-primary" />
-                      <div>
-                        <p className="font-medium">{ft.label} Fault</p>
-                        <p className="text-sm text-muted-foreground">{ft.description}</p>
+                  {platform === "backend" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="backend-endpoints">Observed Endpoints</Label>
+                      <Input
+                        id="backend-endpoints"
+                        value={backendObservedEndpoints}
+                        onChange={(e) => setBackendObservedEndpoints(e.target.value)}
+                        placeholder="http://svc-a,http://svc-b,http://svc-c"
+                      />
+                    </div>
+                  )}
+
+                  {platform === "android" && (
+                    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="android-apk-file">APK File</Label>
+                          <Input id="android-apk-file" ref={androidFileInputRef} type="file" accept=".apk" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="android-apk-id">Uploaded APK ID</Label>
+                          <Input id="android-apk-id" value={androidApkId} onChange={(e) => setAndroidApkId(e.target.value)} placeholder="Upload or paste APK ID" />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={handleAndroidApkUpload} disabled={androidUploading}>
+                          {androidUploading ? "Uploading..." : "Upload APK"}
+                        </Button>
+                        {androidUploadLabel && <Badge variant="outline">{androidUploadLabel}</Badge>}
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="android-avd">AVD Name</Label>
+                          <Input id="android-avd" value={androidAvdName} onChange={(e) => setAndroidAvdName(e.target.value)} />
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                          <div>
+                            <p className="font-medium">Headless Emulator</p>
+                            <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                          </div>
+                          <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                        <div>
+                          <p className="font-medium">Reset App State</p>
+                          <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                        </div>
+                        <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
                       </div>
                     </div>
-                  </TabsContent>
-                ))}
-              </Tabs>
+                  )}
 
-              {platform === "frontend" && (
-                <div className="grid gap-4 lg:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="frontend-base-url">Base URL</Label>
-                    <Input id="frontend-base-url" value={frontendBaseUrl} onChange={(e) => setFrontendBaseUrl(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="frontend-target-url">Target URLs</Label>
-                    <Input id="frontend-target-url" value={frontendTargetUrl} onChange={(e) => setFrontendTargetUrl(e.target.value)} placeholder="/ or example.com, /checkout" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="frontend-metrics-endpoint">Metrics Endpoint</Label>
-                    <Input id="frontend-metrics-endpoint" value={frontendMetricsEndpoint} onChange={(e) => setFrontendMetricsEndpoint(e.target.value)} />
-                  </div>
-                </div>
-              )}
-
-              {platform === "backend" && (
-                <div className="space-y-2">
-                  <Label htmlFor="backend-endpoints">Observed Endpoints</Label>
-                  <Input
-                    id="backend-endpoints"
-                    value={backendObservedEndpoints}
-                    onChange={(e) => setBackendObservedEndpoints(e.target.value)}
-                    placeholder="http://svc-a,http://svc-b,http://svc-c"
-                  />
-                </div>
-              )}
-
-              {platform === "android" && (
-                <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
-                  <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="grid gap-6 lg:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="android-apk-file">APK File</Label>
-                      <Input id="android-apk-file" ref={androidFileInputRef} type="file" accept=".apk" />
+                      <Label className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        {isFrontendFlow ? "Test Duration (seconds)" : "Duration (seconds)"}
+                      </Label>
+                      <Input
+                        type="number"
+                        value={duration}
+                        onChange={(e) => setDuration(parseInt(e.target.value) || 0)}
+                        min={30}
+                        max={3600}
+                      />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="android-apk-id">Uploaded APK ID</Label>
-                      <Input id="android-apk-id" value={androidApkId} onChange={(e) => setAndroidApkId(e.target.value)} placeholder="Upload or paste APK ID" />
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={handleAndroidApkUpload} disabled={androidUploading}>
-                      {androidUploading ? "Uploading..." : "Upload APK"}
-                    </Button>
-                    {androidUploadLabel && <Badge variant="outline">{androidUploadLabel}</Badge>}
-                  </div>
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="android-avd">AVD Name</Label>
-                      <Input id="android-avd" value={androidAvdName} onChange={(e) => setAndroidAvdName(e.target.value)} />
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                      <div>
-                        <p className="font-medium">Headless Emulator</p>
-                        <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                      <Label>{isFrontendFlow ? "Injection Intensity Cap (%)" : "Max Intensity (%)"}</Label>
+                      <div className="pt-2">
+                        <Slider
+                          value={[maxIntensity]}
+                          onValueChange={(v) => setMaxIntensity(v[0])}
+                          min={10}
+                          max={100}
+                          step={5}
+                        />
+                        <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                          <span>10%</span>
+                          <span className="font-medium">{maxIntensity}%</span>
+                          <span>100%</span>
+                        </div>
                       </div>
-                      <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+
+                  <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-medium">Reset App State</p>
-                      <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                      <p className="font-medium">{isFrontendFlow ? "Adaptive Ramp" : "Adaptive Mode"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {isFrontendFlow ? "Gradually increase injection intensity while monitoring frontend stability" : "Gradually increase intensity based on system response"}
+                      </p>
                     </div>
-                    <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
+                    <Switch checked={adaptive} onCheckedChange={setAdaptive} />
                   </div>
-                </div>
-              )}
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    Duration (seconds)
-                  </Label>
-                  <Input
-                    type="number"
-                    value={duration}
-                    onChange={(e) => setDuration(parseInt(e.target.value) || 0)}
-                    min={30}
-                    max={3600}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Max Intensity (%)</Label>
-                  <div className="pt-2">
-                    <Slider
-                      value={[maxIntensity]}
-                      onValueChange={(v) => setMaxIntensity(v[0])}
-                      min={10}
-                      max={100}
-                      step={5}
-                    />
-                    <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-                      <span>10%</span>
-                      <span className="font-medium">{maxIntensity}%</span>
-                      <span>100%</span>
+                  {adaptive && (
+                    <div className="space-y-2">
+                      <Label>Step Intensity (%)</Label>
+                      <div className="pt-2">
+                        <Slider
+                          value={[stepIntensity]}
+                          onValueChange={(v) => setStepIntensity(v[0])}
+                          min={5}
+                          max={25}
+                          step={5}
+                        />
+                        <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                          <span>5%</span>
+                          <span className="font-medium">{stepIntensity}%</span>
+                          <span>25%</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </div>
+                  )}
 
-              <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-medium">Adaptive Mode</p>
-                  <p className="text-sm text-muted-foreground">
-                    Gradually increase intensity based on system response
-                  </p>
-                </div>
-                <Switch checked={adaptive} onCheckedChange={setAdaptive} />
-              </div>
-
-              {adaptive && (
-                <div className="space-y-2">
-                  <Label>Step Intensity (%)</Label>
-                  <div className="pt-2">
-                    <Slider
-                      value={[stepIntensity]}
-                      onValueChange={(v) => setStepIntensity(v[0])}
-                      min={5}
-                      max={25}
-                      step={5}
-                    />
-                    <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-                      <span>5%</span>
-                      <span className="font-medium">{stepIntensity}%</span>
-                      <span>25%</span>
+                  {platform === "android" && (
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                        <div>
+                          <p className="font-medium">Headless Emulator</p>
+                          <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                        </div>
+                        <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                        <div>
+                          <p className="font-medium">Reset App State</p>
+                          <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                        </div>
+                        <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )}
+                  )}
+                </CardContent>
+              </Card>
 
-              {platform === "android" && (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+              {/* Expected Behavior */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    {isFrontendFlow && <Badge variant="outline">5</Badge>}
+                    {isFrontendFlow ? "Frontend Pass Criteria" : "Expected Behavior"}
+                  </CardTitle>
+                  <CardDescription>
+                    {isFrontendFlow ? "Define what a healthy frontend run should maintain and recover" : "Define what the system should do during the test"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-medium">Headless Emulator</p>
-                      <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                      <p className="font-medium">{isFrontendFlow ? "UI Stays Responsive" : "Should Not Crash"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {isFrontendFlow ? "Frontend should remain interactive during injected faults" : "System should remain operational during fault injection"}
+                      </p>
                     </div>
-                    <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
+                    <Switch checked={notCrash} onCheckedChange={setNotCrash} />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                  <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-medium">Reset App State</p>
-                      <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                      <p className="font-medium">{isFrontendFlow ? "Recovers After Fault" : "Should Recover"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {isFrontendFlow ? "Frontend metrics and UX should recover after injection stops" : "System should return to normal after fault is removed"}
+                      </p>
                     </div>
-                    <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
+                    <Switch checked={shouldRecover} onCheckedChange={setShouldRecover} />
                   </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Expected Behavior */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Expected Behavior</CardTitle>
-              <CardDescription>Define what the system should do during the test</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-medium">Should Not Crash</p>
-                  <p className="text-sm text-muted-foreground">
-                    System should remain operational during fault injection
-                  </p>
-                </div>
-                <Switch checked={notCrash} onCheckedChange={setNotCrash} />
-              </div>
-              <div className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-medium">Should Recover</p>
-                  <p className="text-sm text-muted-foreground">
-                    System should return to normal after fault is removed
-                  </p>
-                </div>
-                <Switch checked={shouldRecover} onCheckedChange={setShouldRecover} />
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </>
+          )}
 
           {/* Actions */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
@@ -631,19 +925,18 @@ export default function CreateExperimentPage() {
             <Button variant="outline" onClick={() => router.back()}>
               Cancel
             </Button>
-            <PermissionGuard
-              role={sessionRole ?? "viewer"}
-              allow={["engineer", "admin"]}
-              fallback={<Button disabled>Create & Start Experiment</Button>}
+            <Button
+              className="w-full sm:w-auto"
+              onClick={handleSubmit}
+              disabled={
+                loading ||
+                (requestMode === "form"
+                  ? !name || (platform === "frontend" ? frontendTargetUrls.length === 0 : targets.length === 0)
+                  : !rawRequestJson.trim())
+              }
             >
-              <Button
-                className="w-full sm:w-auto"
-                onClick={handleSubmit}
-                disabled={loading || !name || targets.length === 0}
-              >
-                {loading ? "Creating..." : "Create & Start Experiment"}
-              </Button>
-            </PermissionGuard>
+              {loading ? "Creating..." : isFrontendFlow ? "Start Frontend Test Run" : "Create & Start Experiment"}
+            </Button>
           </div>
         </div>
       </div>

@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 
 async function forward(request: NextRequest, path: string[], method: string) {
   const url = new URL(request.url)
   const query = url.search ? url.search : ""
   const target = `${BACKEND_BASE_URL}/${path.join("/")}${query}`
+  console.log(`🔴 [BACKEND PROXY] ${method} ${target}`)
 
   const headers = new Headers()
   const contentType = request.headers.get("content-type")
-  const apiKey = request.headers.get("x-api-key")
   const accept = request.headers.get("accept")
+  const apiKey = getForwardedApiKey(request)
 
   if (contentType) headers.set("content-type", contentType)
-  if (apiKey) headers.set("x-api-key", apiKey)
-  else if (BACKEND_API_KEY) headers.set("x-api-key", BACKEND_API_KEY)
+  headers.set("x-api-key", apiKey)
+  console.log(`📋 Forwarding with x-api-key: ${apiKey}`)
   if (accept) headers.set("accept", accept)
 
   const hasBody = method !== "GET" && method !== "HEAD"
@@ -27,6 +28,7 @@ async function forward(request: NextRequest, path: string[], method: string) {
     body,
     cache: "no-store",
   })
+  console.log(`🟢 [BACKEND RESPONSE] ${response.status} ${target}`)
 
   const responseContentType = response.headers.get("content-type") ?? ""
   if (responseContentType.includes("application/json")) {

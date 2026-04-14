@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = request.headers.get("x-api-key")
     const headers = {
-      ...(apiKey ? { "x-api-key": apiKey } : BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
+      "x-api-key": getForwardedApiKey(request),
       "content-type": "application/json",
     }
 

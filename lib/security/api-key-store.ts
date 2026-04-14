@@ -1,4 +1,5 @@
 let runtimeApiKey: string | null = null
+export const HARDCODED_BACKEND_API_KEY = "fs_dev_engineer_test-engineer-3_c0110e3975600e2dce809046d2b2a155631b0a5daec57417b4be1ba289958d64"
 
 const ACTIVE_KEY_STORAGE = "failsafe:active-api-key"
 const KEY_META_STORAGE = "failsafe:api-key-meta"
@@ -44,7 +45,7 @@ export function getApiKey(): string | null {
     }
   }
 
-  return runtimeApiKey
+  return runtimeApiKey || HARDCODED_BACKEND_API_KEY
 }
 
 export function maskApiKey(key: string): string {

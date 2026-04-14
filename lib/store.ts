@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { parseError } from "@/lib/errors/error-handler"
 import { requestClient } from "@/lib/api/request-client"
 
 export type ExperimentPhase = "baseline" | "injecting" | "recovering" | "completed" | "failed"
@@ -42,15 +43,23 @@ export interface Experiment {
 export interface SystemMetrics {
   blastRadius: number
   cascadeDepth: number
-  severity: "low" | "medium" | "high" | "critical"
+  severity: "low" | "medium" | "high" | "critical" | "isolated" | "unknown"
 }
 
 export interface EndpointMetrics {
   endpoint: string
+  requestsTotal?: number
+  latencyP50?: number
   latencyAvg: number
   latencyP95: number
   latencyP99: number
+  jitterMs?: number
+  stddevMs?: number
+  errorTotal?: number
+  maxFailureStreak?: number
   errorRate: number
+  impactOrder?: number
+  stabilityScore?: number
   cpu: number
   memory: number
   degraded: boolean
@@ -92,6 +101,7 @@ interface AppState {
   setBackendContainers: (containers: BackendContainerSummary[]) => void
   backendContainersStatus: BackendContainerLoadStatus
   backendContainersError: string | null
+  backendContainersUnavailable: boolean
   loadBackendContainers: (options?: { force?: boolean }) => Promise<BackendContainerSummary[]>
 }
 
@@ -127,6 +137,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   backendContainersStatus: "idle",
   backendContainersError: null,
+  backendContainersUnavailable: false,
   loadBackendContainers: async (options) => {
     const force = options?.force ?? false
     const state = get()
@@ -141,7 +152,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     backendContainersInFlight = (async () => {
-      set({ backendContainersStatus: "loading", backendContainersError: null })
+      set({ backendContainersStatus: "loading", backendContainersError: null, backendContainersUnavailable: false })
 
       try {
         const items = await requestClient<BackendContainerSummary[]>("/api/containers", {
@@ -152,11 +163,31 @@ export const useAppStore = create<AppState>((set, get) => ({
           backendContainersFetchedAt: Date.now(),
           backendContainersStatus: "ready",
           backendContainersError: null,
+          backendContainersUnavailable: false,
         })
         return items
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load containers"
-        set({ backendContainersStatus: "error", backendContainersError: message })
+        const parsed = parseError(error)
+        const shouldFallbackToEmptyState =
+          parsed.type === "backend_crash" ||
+          parsed.type === "network_failure" ||
+          parsed.type === "auth_failure" ||
+          parsed.status === 401 ||
+          parsed.status === 503
+
+        if (shouldFallbackToEmptyState) {
+          set({
+            backendContainers: [],
+            backendContainersFetchedAt: Date.now(),
+            backendContainersStatus: "ready",
+            backendContainersError: null,
+            backendContainersUnavailable: true,
+          })
+          return []
+        }
+
+        const message = parsed.message || "Failed to load containers"
+        set({ backendContainersStatus: "error", backendContainersError: message, backendContainersUnavailable: false })
         throw error
       } finally {
         backendContainersInFlight = null

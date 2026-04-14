@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAuthContext, hasAnyRole } from "@/lib/server/request-auth"
+import { getAuthContext, getForwardedApiKey, hasAnyRole } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 
 export async function POST(
   request: NextRequest,
@@ -18,7 +17,7 @@ export async function POST(
     }
 
     const { id } = await params
-    const apiKey = request.headers.get("x-api-key")
+  const apiKey = getForwardedApiKey(request)
 
     for (const platform of ["backend", "frontend", "android"] as const) {
       const response = await fetch(
@@ -27,7 +26,7 @@ export async function POST(
           method: "POST",
           cache: "no-store",
           headers: {
-            ...(apiKey ? { "x-api-key": apiKey } : BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
+            "x-api-key": apiKey,
           },
         },
       )

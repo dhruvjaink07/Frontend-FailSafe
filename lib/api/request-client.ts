@@ -110,14 +110,13 @@ export async function requestClient<T>(url: string, options: RequestOptions = {}
 
   const task = (async () => {
     try {
-      const apiKey = getApiKey()
       const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData
       const res = await fetch(url, {
         ...options,
         signal,
         headers: {
           ...(isFormData ? {} : { "Content-Type": "application/json" }),
-          ...(apiKey ? { "x-api-key": apiKey } : {}),
+          "x-api-key": getApiKey() ?? "",
           ...options.headers,
         },
       })
@@ -132,7 +131,10 @@ export async function requestClient<T>(url: string, options: RequestOptions = {}
         throw parseError({ ...(payload as object), status: res.status })
       }
 
-      if (res.status === 204) return null as T
+      if (res.status === 204) {
+        return null as T
+      }
+
       return (await res.json()) as T
     } catch (error) {
       throw parseError(error)

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 const BACKEND_ENVIRONMENT = process.env.BACKEND_ENVIRONMENT ?? "dev"
 const CREATE_KEY_PATH = "/internal/api-keys/create"
 
@@ -12,8 +12,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const apiKey = getForwardedApiKey(request)
     const body = await request.json()
-    const { name, role } = body as { name?: string; role?: string }
+    const { name, role, key } = body as { name?: string; role?: string; key?: string }
 
     if (!name || !role) {
       return NextResponse.json(
@@ -34,12 +35,13 @@ export async function POST(request: NextRequest) {
       cache: "no-store",
       headers: {
         "content-type": "application/json",
-        ...(BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
+        "x-api-key": apiKey,
       },
       body: JSON.stringify({
         environment: BACKEND_ENVIRONMENT,
         role,
         name,
+        ...(typeof key === "string" && key.trim() ? { key: key.trim() } : {}),
       }),
     })
 

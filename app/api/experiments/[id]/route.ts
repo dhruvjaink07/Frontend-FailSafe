@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 
 export async function GET(
   request: NextRequest,
@@ -9,11 +9,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const apiKey = request.headers.get("x-api-key")
-
-    const headers = {
-      ...(apiKey ? { "x-api-key": apiKey } : BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
-    }
+    const apiKey = getForwardedApiKey(request)
+    const headers = { "x-api-key": apiKey }
 
     const backend = await (async () => {
       const response = await fetch(
@@ -69,10 +66,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    const apiKey = request.headers.get("x-api-key")
-    const headers = {
-      ...(apiKey ? { "x-api-key": apiKey } : BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
-    }
+    const apiKey = getForwardedApiKey(request)
+    const headers = { "x-api-key": apiKey }
 
     for (const platform of ["backend", "frontend", "android"] as const) {
       const response = await fetch(

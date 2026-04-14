@@ -16,6 +16,8 @@ export interface FrontendStartPayload {
     base_url: string
     metrics_endpoint: string
     target_urls: string[]
+    headless?: boolean
+    browser?: string
   }
 }
 
@@ -31,6 +33,8 @@ export interface FrontendExperimentResponse {
     base_url: string
     metrics_endpoint: string
     target_urls: string[]
+    headless?: boolean
+    browser?: string
   }
   created_at: string
   updated_at: string
@@ -245,6 +249,75 @@ export interface SessionRole {
   keyId: string
 }
 
+export interface ExperimentHistoryItem {
+  experiment: {
+    id: string
+    fault_type: string
+    target_type: "backend" | "android" | "frontend"
+    state: string
+    phase: string
+    created_at: string
+    updated_at: string
+  }
+  metrics: {
+    status_payload: Record<string, unknown> | null
+    aggregated: Array<{
+      endpoint: string
+      requests_total: number
+      p50_ms: number
+      p95_ms: number
+      p99_ms: number
+      avg_ms: number
+      stddev_ms: number
+      jitter_ms: number
+      error_rate: number
+      max_failure_streak: number
+      latency_ratio: number
+      error_delta: number
+      stability_score: number
+      impact_order: number
+      degraded: boolean
+      avg_cpu: number
+      max_cpu: number
+      avg_memory: number
+      max_memory: number
+    }>
+    raw: Array<Record<string, unknown>>
+  }
+  summary:
+    | {
+        blast_radius: number
+        cascade_depth: number
+        system_severity: string
+        total_requests: number
+      }
+    | {
+        target_package: string
+        scenario: string
+        failure_type: string
+        health_status: string
+        severity: string
+        crash_reason: string
+        recovered: boolean
+        auto_recovered: boolean
+        stable_recovered: boolean
+        manual_intervention_required: boolean
+        running: boolean
+        recovery_time_ms: number
+        summary_result: string
+        summary_reason: string
+        summary_suggestion: string
+      }
+    | null
+}
+
+export interface ExperimentHistoryResponse {
+  items: ExperimentHistoryItem[]
+  count: number
+  limit: number
+  offset: number
+}
+
 // Experiment APIs
 export async function startExperiment(payload: CreateExperimentPayload): Promise<Experiment> {
   if (payload.platform === "frontend") {
@@ -380,6 +453,24 @@ export async function getExperiments(): Promise<Experiment[]> {
     dedupeKey: "experiments:list",
   })
   return raw.map((item) => normalizeExperiment(item))
+}
+
+export async function getExperimentHistory(params?: { limit?: number; offset?: number }): Promise<ExperimentHistoryResponse> {
+  const search = new URLSearchParams()
+  if (typeof params?.limit === "number") search.set("limit", String(params.limit))
+  if (typeof params?.offset === "number") search.set("offset", String(params.offset))
+  const query = search.toString()
+  return requestClient<ExperimentHistoryResponse>(buildApiUrl(`/experiments/history${query ? `?${query}` : ""}`), {
+    dedupeKey: `experiments:history:${query || "default"}`,
+    cache: "no-store",
+  })
+}
+
+export async function getExperimentHistoryDetail(id: string): Promise<ExperimentHistoryItem> {
+  return requestClient<ExperimentHistoryItem>(buildApiUrl(`/experiments/history/detail?id=${encodeURIComponent(id)}`), {
+    dedupeKey: `experiments:history:detail:${id}`,
+    cache: "no-store",
+  })
 }
 
 export async function getExperimentStatus(id: string): Promise<Experiment> {

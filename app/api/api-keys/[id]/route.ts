@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiKeys } from "@/lib/server/api-key-registry"
+import { getForwardedApiKey } from "@/lib/server/request-auth"
 
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY
 const BACKEND_API_KEYS_PATH = process.env.BACKEND_API_KEYS_PATH
 
 function getApiKeyByIdCandidates(id: string) {
@@ -22,13 +22,14 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+    const apiKey = getForwardedApiKey(_request)
 
     for (const path of getApiKeyByIdCandidates(id)) {
       const backendResponse = await fetch(`${BACKEND_BASE_URL}${path}`, {
         method: "DELETE",
         cache: "no-store",
         headers: {
-          ...(BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
+          "x-api-key": apiKey,
         },
       })
 
@@ -56,12 +57,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params
+    const apiKey = getForwardedApiKey(_request)
 
     for (const path of getApiKeyByIdCandidates(id)) {
       const backendResponse = await fetch(`${BACKEND_BASE_URL}${path}`, {
         cache: "no-store",
         headers: {
-          ...(BACKEND_API_KEY ? { "x-api-key": BACKEND_API_KEY } : {}),
+          "x-api-key": apiKey,
         },
       })
 

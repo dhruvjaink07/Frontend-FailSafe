@@ -1,0 +1,194 @@
+{
+  "generatedAt": "2026-04-13",
+  "workspace": "d:/frontendfailsafe",
+  "purpose": "Map where API routes are defined, which shared client functions call them, and which UI files invoke them directly.",
+  "apiDefinitions": [
+    {
+      "route": "/api/experiments",
+      "file": "app/api/experiments/route.ts",
+      "methods": ["GET", "POST"],
+      "summary": "List experiments or create a new experiment.",
+      "upstream": "BACKEND_BASE_URL/experiments"
+    },
+    {
+      "route": "/api/experiments/history",
+      "file": "app/api/experiments/history/route.ts",
+      "methods": ["GET"],
+      "summary": "Return experiment history with pagination and backend fallback.",
+      "upstream": "BACKEND_BASE_URL/experiments/history, fallback to BACKEND_BASE_URL/experiments"
+    },
+    {
+      "route": "/api/experiments/[id]",
+      "file": "app/api/experiments/[id]/route.ts",
+      "methods": ["GET", "DELETE"],
+      "summary": "Fetch or delete one experiment.",
+      "upstream": "Backend experiment detail endpoints"
+    },
+    {
+      "route": "/api/experiments/[id]/stop",
+      "file": "app/api/experiments/[id]/stop/route.ts",
+      "methods": ["POST"],
+      "summary": "Stop a running experiment.",
+      "upstream": "Backend stop endpoint for the given experiment id"
+    },
+    {
+      "route": "/api/experiments/[id]/metrics",
+      "file": "app/api/experiments/[id]/metrics/route.ts",
+      "methods": ["GET"],
+      "summary": "Return experiment metrics, normalized by target platform.",
+      "upstream": "Backend metrics endpoints for backend, frontend, and android experiments"
+    },
+    {
+      "route": "/api/metrics/system",
+      "file": "app/api/metrics/system/route.ts",
+      "methods": ["GET"],
+      "summary": "Proxy system metrics from the backend.",
+      "upstream": "BACKEND_BASE_URL/metrics/system"
+    },
+    {
+      "route": "/api/logs",
+      "file": "app/api/logs/route.ts",
+      "methods": ["GET"],
+      "summary": "Proxy log entries from the backend.",
+      "upstream": "BACKEND_BASE_URL/logs"
+    },
+    {
+      "route": "/api/health",
+      "file": "app/api/health/route.ts",
+      "methods": ["GET"],
+      "summary": "Backend health probe.",
+      "upstream": "BACKEND_BASE_URL/health"
+    },
+    {
+      "route": "/api/auth/role",
+      "file": "app/api/auth/role/route.ts",
+      "methods": ["GET"],
+      "summary": "Return the current session role.",
+      "upstream": null
+    },
+    {
+      "route": "/api/containers",
+      "file": "app/api/containers/route.ts",
+      "methods": ["GET"],
+      "summary": "List backend containers with normalization and fallback candidate paths.",
+      "upstream": ["/environment/containers", "/containers", "/containers/list", "/docker/containers", "/engine/containers"]
+    },
+    {
+      "route": "/api/containers/engine/start",
+      "file": "app/api/containers/engine/start/route.ts",
+      "methods": ["POST"],
+      "summary": "Start the Docker engine.",
+      "upstream": "Backend engine start endpoint"
+    },
+    {
+      "route": "/api/containers/[name]/start",
+      "file": "app/api/containers/[name]/start/route.ts",
+      "methods": ["POST"],
+      "summary": "Start one container.",
+      "upstream": "Backend container start endpoint"
+    },
+    {
+      "route": "/api/containers/[name]/stop",
+      "file": "app/api/containers/[name]/stop/route.ts",
+      "methods": ["POST"],
+      "summary": "Stop one container.",
+      "upstream": "Backend container stop endpoint"
+    },
+    {
+      "route": "/api/api-keys",
+      "file": "app/api/api-keys/route.ts",
+      "methods": ["GET", "POST"],
+      "summary": "List cached API keys or create a key through the backend.",
+      "upstream": "GET is local; POST uses /internal/api-keys/create"
+    },
+    {
+      "route": "/api/api-keys/[id]",
+      "file": "app/api/api-keys/[id]/route.ts",
+      "methods": ["GET", "DELETE"],
+      "summary": "Fetch or delete one API key from local cache/state.",
+      "upstream": null
+    },
+    {
+      "route": "/api/backend/[...path]",
+      "file": "app/api/backend/[...path]/route.ts",
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      "summary": "Generic proxy to the backend for arbitrary paths.",
+      "upstream": "BACKEND_BASE_URL/{path...}"
+    }
+  ],
+  "apiConsumers": [
+    {
+      "file": "lib/api.ts",
+      "role": "shared client",
+      "functions": [
+        { "name": "startExperiment", "calls": ["/api/experiments", "/api/experiments/frontend/start", "/api/experiments/android/start"] },
+        { "name": "startFrontendExperiment", "calls": ["/api/backend/experiments/frontend/start"] },
+        { "name": "getFrontendExperimentStatus", "calls": ["/api/backend/experiments/frontend/status?id=..."] },
+        { "name": "getFrontendMetricsReport", "calls": ["/api/backend/experiments/frontend/metrics?id=..."] },
+        { "name": "stopFrontendExperiment", "calls": ["/api/backend/experiments/frontend/stop?id=..."] },
+        { "name": "startBackendExperiment", "calls": ["/api/backend/experiments/backend/start"] },
+        { "name": "getBackendExperimentStatus", "calls": ["/api/backend/experiments/backend/status?id=..."] },
+        { "name": "getBackendMetricsReport", "calls": ["/api/backend/experiments/backend/metrics?id=..."] },
+        { "name": "stopBackendExperiment", "calls": ["/api/backend/experiments/backend/stop?id=..."] },
+        { "name": "uploadAndroidApk", "calls": ["/api/backend/upload/apk"] },
+        { "name": "startAndroidExperiment", "calls": ["/api/backend/experiments/android/start"] },
+        { "name": "getAndroidExperimentStatus", "calls": ["/api/backend/experiments/android/status?id=..."] },
+        { "name": "getAndroidMetricsReport", "calls": ["/api/backend/experiments/android/metrics?id=..."] },
+        { "name": "stopAndroidExperiment", "calls": ["/api/backend/experiments/android/stop?id=..."] },
+        { "name": "getExperiments", "calls": ["/api/experiments"] },
+        { "name": "getExperimentHistory", "calls": ["/api/experiments/history"] },
+        { "name": "getExperimentStatus", "calls": ["/api/experiments/[id]"] },
+        { "name": "stopExperiment", "calls": ["/api/experiments/[id]/stop"] },
+        { "name": "getMetrics", "calls": ["/api/experiments/[id]/metrics"] },
+        { "name": "getSystemMetrics", "calls": ["/api/metrics/system"] },
+        { "name": "getContainers", "calls": ["/api/containers"] },
+        { "name": "startContainer", "calls": ["/api/containers/[name]/start"] },
+        { "name": "stopContainer", "calls": ["/api/containers/[name]/stop"] },
+        { "name": "getApiKeys", "calls": ["/api/api-keys"] },
+        { "name": "createApiKey", "calls": ["/api/api-keys"] },
+        { "name": "deleteApiKey", "calls": ["/api/api-keys/[id]"] },
+        { "name": "getLogs", "calls": ["/api/logs"] },
+        { "name": "getSessionRole", "calls": ["/api/auth/role"] }
+      ]
+    },
+    {
+      "file": "app/(dashboard)/environment/page.tsx",
+      "role": "UI direct caller",
+      "calls": [
+        "POST /api/containers/engine/start",
+        "POST /api/containers/[name]/start",
+        "POST /api/containers/[name]/stop"
+      ]
+    },
+    {
+      "file": "app/(dashboard)/settings/api-keys/page.tsx",
+      "role": "UI direct caller",
+      "calls": ["POST /api/api-keys"]
+    },
+    {
+      "file": "app/(dashboard)/experiments/[id]/page.tsx",
+      "role": "UI direct caller",
+      "calls": ["GET /api/experiments/[id]"]
+    },
+    {
+      "file": "lib/store.ts",
+      "role": "store layer",
+      "calls": ["GET /api/containers"]
+    },
+    {
+      "file": "lib/session/experiment-session.ts",
+      "role": "polling/session layer",
+      "calls": ["GET /api/experiments/[id]", "GET /api/experiments/[id]/metrics"]
+    }
+  ],
+  "externalBackendCalls": [
+    {
+      "file": "components/core/connection-status-card.tsx",
+      "calls": ["HEALTH_URL"]
+    },
+    {
+      "file": "components/core/backend-health-banner.tsx",
+      "calls": ["HEALTH_URL"]
+    }
+  ]
+}

@@ -34,19 +34,27 @@ export class ExperimentSession {
       intervalMs: config.POLL_ACTIVE_MS,
       hiddenIntervalMs: config.POLL_HIDDEN_MS,
       onTick: async () => {
-        const [experimentRaw, metricsRaw] = await Promise.all([
-          requestClient<Record<string, unknown>>(buildApiUrl(`/experiments/${id}`), { dedupeKey: `exp:${id}` }),
-          requestClient<Record<string, unknown>>(buildApiUrl(`/experiments/${id}/metrics`), { dedupeKey: `metrics:${id}` }),
-        ])
-
+        const experimentRaw = await requestClient<Record<string, unknown>>(buildApiUrl(`/experiments/${id}`), {
+          dedupeKey: `exp:${id}`,
+        })
         const experiment = normalizeExperiment(experimentRaw)
-        const metrics = normalizeMetricSnapshot(metricsRaw)
+
+        let metrics = this.state.metrics
+        try {
+          const metricsRaw = await requestClient<Record<string, unknown>>(buildApiUrl(`/experiments/${id}/metrics`), {
+            dedupeKey: `metrics:${id}`,
+          })
+          metrics = {
+            ...normalizeMetricSnapshot(metricsRaw),
+            intensityHistory: decimateTimeSeries(normalizeMetricSnapshot(metricsRaw).intensityHistory, config.MAX_METRIC_POINTS),
+          }
+        } catch {
+          // Keep the last known metrics snapshot until the backend exposes a new one.
+        }
+
         this.state = {
           experiment,
-          metrics: {
-            ...metrics,
-            intensityHistory: decimateTimeSeries(metrics.intensityHistory, config.MAX_METRIC_POINTS),
-          },
+          metrics,
           connection: this.state.connection,
           lastUpdatedAt: Date.now(),
         }

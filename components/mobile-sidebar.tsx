@@ -7,6 +7,7 @@ import { Menu, X, Shield } from "lucide-react"
 import {
   LayoutDashboard,
   FlaskConical,
+  History,
   BarChart3,
   ScrollText,
   Server,
@@ -19,6 +20,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Experiments", href: "/experiments", icon: FlaskConical },
+  { name: "History", href: "/experiments/history", icon: History },
   { name: "Metrics", href: "/metrics", icon: BarChart3 },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
@@ -28,6 +30,10 @@ const navigation = [
 export function MobileSidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const pathname = usePathname()
+  const activeHref =
+    navigation
+      .filter((item) => pathname === item.href || pathname.startsWith(item.href + "/"))
+      .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null
 
   return (
     <>
@@ -83,7 +89,7 @@ export function MobileSidebar() {
         <nav className="p-4">
           <ul className="space-y-1">
             {navigation.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+              const isActive = item.href === activeHref
               return (
                 <li key={item.name}>
                   <Link

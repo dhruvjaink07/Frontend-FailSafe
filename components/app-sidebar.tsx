@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   FlaskConical,
+  History,
   BarChart3,
   ScrollText,
   Server,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils"
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Experiments", href: "/experiments", icon: FlaskConical },
+  { name: "History", href: "/experiments/history", icon: History },
   { name: "Metrics", href: "/metrics", icon: BarChart3 },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
@@ -25,6 +27,10 @@ const navigation = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const activeHref =
+    navigation
+      .filter((item) => pathname === item.href || pathname.startsWith(item.href + "/"))
+      .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar">
@@ -41,7 +47,7 @@ export function AppSidebar() {
         <nav className="flex-1 overflow-y-auto p-4">
           <ul className="space-y-1">
             {navigation.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+              const isActive = item.href === activeHref
               return (
                 <li key={item.name}>
                   <Link
