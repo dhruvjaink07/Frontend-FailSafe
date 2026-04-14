@@ -1,0 +1,64 @@
+{
+  "docs": [
+    {
+      "id": 1,
+      "title": "layout",
+      "href": "/docs/layout",
+      "excerpt": "\"use client\" import Link from \"next/link\" import { usePathname } from \"next/navigation\" import { cn } from \"@/lib/utils\" import { ThemeToggle } from \"@/components/theme-toggle\" import { Button } from \"@/components/ui/button\" import { Input } from \"@/components/ui/input\" import { ScrollArea } from \""
+    },
+    {
+      "id": 2,
+      "title": "page",
+      "href": "/docs",
+      "excerpt": "import { Card, CardContent, CardDescription, CardHeader, CardTitle } from \"@/components/ui/card\" import { Badge } from \"@/components/ui/badge\" import { Zap, FlaskConical, Server, Monitor, Smartphone, ArrowRight } from \"lucide-react\" import Link from \"next/link\" export const metadata = { title: \"G"
+    },
+    {
+      "id": 3,
+      "title": "page",
+      "href": "/docs/android",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" export const metadata = { title: \"Android Testing | FailSafe Documentation\", description: \"Verified Android experiment endpoints and upload flow\", } function Co"
+    },
+    {
+      "id": 4,
+      "title": "Run FailSafe with Docker socket access",
+      "href": "/docs/backend",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from \"@/components/ui/table\" export const metadata = { title: \"Backend Testing | Fail"
+    },
+    {
+      "id": 5,
+      "title": "page",
+      "href": "/docs/api",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from \"@/components/ui/table\" export const metadata = { title: \"API Reference | FailSafe Docum"
+    },
+    {
+      "id": 6,
+      "title": "By label selector",
+      "href": "/docs/experiments",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" export const metadata = { title: \"Experiments Guide | FailSafe Documentation\", description: \"Guide to running chaos experiments on backend, frontend, and Android platfor"
+    },
+    {
+      "id": 7,
+      "title": "page",
+      "href": "/docs/frontend",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" export const metadata = { title: \"Frontend Testing | FailSafe Documentation\", description: \"Detailed guide to frontend chaos testing with FailSafe\", } function CodeBloc"
+    },
+    {
+      "id": 8,
+      "title": "page",
+      "href": "/docs/concepts",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from \"@/components/ui/table\" export const metadata = { title: \"Core Concepts | FailSa"
+    },
+    {
+      "id": 9,
+      "title": "page",
+      "href": "/docs/errors",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from \"@/components/ui/table\" export const metadata = { title: \"Error Handling | FailSafe Docu"
+    },
+    {
+      "id": 10,
+      "title": "page",
+      "href": "/docs/responses",
+      "excerpt": "import { Badge } from \"@/components/ui/badge\" import { Card, CardContent, CardHeader, CardTitle } from \"@/components/ui/card\" export const metadata = { title: \"Response Structures | FailSafe Documentation\", description: \"Verified response formats for FailSafe experiments and reports\", }"
+    }
+  ]
+}

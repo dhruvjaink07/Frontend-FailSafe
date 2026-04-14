@@ -23,7 +23,11 @@ import {
   ChevronRight,
   Home,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useMemo } from "react"
+import dynamic from 'next/dynamic'
+
+const DocsSearch = dynamic(() => import('@/components/docs/DocsSearch'), { ssr: false })
+const HighlightMatches = dynamic(() => import('@/components/docs/HighlightMatches'), { ssr: false })
 
 const navItems = [
   {
@@ -110,6 +114,21 @@ const navItems = [
 
 function DocsSidebar({ className }: { className?: string }) {
   const pathname = usePathname()
+  const [query, setQuery] = useState("")
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return navItems
+    return navItems
+      .map((item) => {
+        const matchesTop = item.title.toLowerCase().includes(q)
+        const matchedSub = item.items ? item.items.filter((s) => s.title.toLowerCase().includes(q)) : []
+        if (matchesTop) return { ...item, items: item.items }
+        if (matchedSub.length) return { ...item, items: matchedSub }
+        return null
+      })
+      .filter(Boolean) as typeof navItems
+  }, [query])
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
@@ -124,45 +143,51 @@ function DocsSidebar({ className }: { className?: string }) {
       <div className="p-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search docs..." className="pl-9" />
+          <div className="pl-9">
+            <DocsSearch />
+          </div>
         </div>
       </div>
       <ScrollArea className="flex-1 px-4">
         <nav className="space-y-1 pb-8">
-          {navItems.map((item) => {
-            const Icon = item.icon
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
-            
-            return (
-              <div key={item.href}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          {filtered.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No results. Try different keywords.</p>
+          ) : (
+            filtered.map((item) => {
+              const Icon = item.icon
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+
+              return (
+                <div key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.title}
+                  </Link>
+                  {item.items && isActive && (
+                    <div className="ml-7 mt-1 space-y-1 border-l border-border pl-3">
+                      {item.items.map((subItem) => (
+                        <Link
+                          key={subItem.href}
+                          href={subItem.href}
+                          className="block py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {subItem.title}
+                        </Link>
+                      ))}
+                    </div>
                   )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.title}
-                </Link>
-                {item.items && isActive && (
-                  <div className="ml-7 mt-1 space-y-1 border-l border-border pl-3">
-                    {item.items.map((subItem) => (
-                      <Link
-                        key={subItem.href}
-                        href={subItem.href}
-                        className="block py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {subItem.title}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                </div>
+              )
+            })
+          )}
         </nav>
       </ScrollArea>
     </div>
@@ -213,9 +238,10 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             </div>
             <ThemeToggle />
           </div>
-          <div className="max-w-4xl mx-auto px-6 py-8">
+          <div id="docs-content" className="max-w-4xl mx-auto px-6 py-8">
             {children}
           </div>
+          <HighlightMatches />
         </main>
       </div>
     </div>

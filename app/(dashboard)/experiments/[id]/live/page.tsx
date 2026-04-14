@@ -47,6 +47,26 @@ type LiveExperiment = {
   createdAt?: string
   updatedAt?: string
   package?: string
+  targetType?: string
+  observationType?: string
+  currentState?: string
+  healthStatus?: string
+  healthSeverity?: string
+  crashReason?: string
+  failureType?: string
+  scenario?: string
+  isTerminal?: boolean
+  progressPercent?: number
+  durationSeconds?: number
+  elapsedMs?: number
+  faultElapsedMs?: number
+  phaseElapsedMs?: number
+  nextFaultEtaMs?: number
+  faultsApplied?: number
+  faultsScheduled?: number
+  impactObserved?: boolean
+  recoveryObserved?: boolean
+  validationPassed?: boolean
 }
 
 type LiveMetrics =
@@ -81,6 +101,115 @@ function safeStringArray(value: unknown): string[] {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+}
+
+function readAndroidStatusExperiment(source: unknown): Record<string, unknown> {
+  const root = asRecord(source)
+  const experiment = asRecord(root.experiment)
+  return Object.keys(experiment).length ? experiment : root
+}
+
+function normalizeAndroidStatus(source: unknown) {
+  const root = asRecord(source)
+  const experiment = readAndroidStatusExperiment(root)
+  const progress = asRecord(root.progress)
+  const faults = asRecord(root.faults)
+  const health = asRecord(root.health)
+  const timelineStatus = asRecord(root.timeline_status)
+  const validation = asRecord(root.validation)
+
+  return {
+    id: String(experiment.id ?? root.id ?? ""),
+    state: String(experiment.state ?? root.state ?? root.current_state ?? "running") as LiveExperiment["state"],
+    phase: String(experiment.phase ?? root.phase ?? "baseline") as LiveExperiment["phase"],
+    faultType: String(experiment.fault_type ?? root.fault_type ?? "unknown"),
+    package: typeof root.package === "string" ? root.package : typeof experiment.package === "string" ? experiment.package : undefined,
+    targetType: typeof root.target_type === "string" ? root.target_type : undefined,
+    observationType: typeof root.observation_type === "string" ? root.observation_type : undefined,
+    currentState: typeof root.current_state === "string" ? root.current_state : undefined,
+    healthStatus: typeof health.status === "string" ? health.status : undefined,
+    healthSeverity: typeof health.severity === "string" ? health.severity : undefined,
+    crashReason: typeof health.crash_reason === "string" ? health.crash_reason : undefined,
+    failureType: typeof health.failure_type === "string" ? health.failure_type : undefined,
+    scenario: typeof root.scenario === "string" ? root.scenario : undefined,
+    isTerminal: Boolean(root.is_terminal),
+    progressPercent: safeNumber(progress.completed_percent_of_plan),
+    durationSeconds: safeNumber(progress.duration_seconds),
+    elapsedMs: safeNumber(progress.elapsed_ms),
+    faultElapsedMs: safeNumber(progress.fault_elapsed_ms),
+    phaseElapsedMs: safeNumber(progress.phase_elapsed_ms),
+    nextFaultEtaMs: safeNumber(root.next_fault_eta_ms, -1),
+    faultsApplied: safeNumber(faults.applied),
+    faultsScheduled: safeNumber(faults.scheduled),
+    impactObserved: Boolean(timelineStatus.impact_observed),
+    recoveryObserved: Boolean(timelineStatus.recovery_observed),
+    validationPassed: Boolean(validation.passed),
+    createdAt: typeof root.created_at === "string" ? root.created_at : undefined,
+    updatedAt: typeof root.updated_at === "string" ? root.updated_at : undefined,
+  }
+}
+
+function normalizeAndroidMetrics(source: unknown) {
+  const root = asRecord(source)
+  const health = asRecord(root.health)
+  const impact = asRecord(root.impact)
+  const recovery = asRecord(root.recovery)
+  const resilienceThreshold = asRecord(root.resilience_threshold)
+  const stability = asRecord(root.stability)
+  const validation = asRecord(root.validation)
+  const summary = asRecord(root.summary)
+  const crashClassification = asRecord(root.crash_classification)
+  const timeline = asRecord(root.timeline)
+
+  const replayHints = Array.isArray(root.replay_hints)
+    ? root.replay_hints.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : []
+
+  return {
+    blastRadius: safeNumber(root.blast_radius_percent ?? impact.blast_radius_percent),
+    cascadeDepth: safeNumber(root.cascade_depth ?? impact.cascade_depth),
+    scenario: typeof root.scenario === "string" ? root.scenario : "",
+    severity: typeof health.severity === "string" ? health.severity : "unknown",
+    status: typeof health.status === "string" ? health.status : "unknown",
+    failureType: typeof health.failure_type === "string" ? health.failure_type : "unknown",
+    crashReason: typeof health.crash_reason === "string" ? health.crash_reason : "",
+    uptimePercent: safeNumber(stability.uptime_percent),
+    crashRatePercent: safeNumber(stability.crash_rate_percent),
+    anrDetected: Boolean(stability.anr_detected),
+    backgroundSamples: safeNumber(stability.background_samples),
+    unexpectedRestarts: safeNumber(stability.unexpected_restarts),
+    warningSignals: safeNumber(stability.warning_signals),
+    autoRecovered: Boolean(recovery.auto_recovered),
+    manualInterventionRequired: Boolean(recovery.manual_intervention_required),
+    recovered: Boolean(recovery.recovered),
+    stableRecovered: Boolean(recovery.stable_recovered),
+    running: Boolean(recovery.running),
+    recoveryTimeMs: safeNumber(recovery.recovery_time_ms),
+    validationConfigured: Boolean(validation.configured),
+    validationPassed: Boolean(validation.passed),
+    validationReasons: safeStringArray(validation.reasons),
+    expected: asRecord(validation.expected),
+    maxStableIntensity: safeNumber(resilienceThreshold.max_stable_intensity),
+    breakingIntensity: safeNumber(resilienceThreshold.breaking_intensity),
+    intensitySteps: Array.isArray(resilienceThreshold.intensity_steps)
+      ? resilienceThreshold.intensity_steps.filter((value): value is number => typeof value === "number")
+      : [],
+    summaryResult: typeof summary.result === "string" ? summary.result : "",
+    summaryReason: typeof summary.reason === "string" ? summary.reason : "",
+    summarySuggestion: typeof summary.suggestion === "string" ? summary.suggestion : "",
+    replayHintsCount: replayHints.length,
+    crashClassification: {
+      lifecycleBug: safeNumber(crashClassification.lifecycle_bug),
+      networkBug: safeNumber(crashClassification.network_bug),
+      uiBug: safeNumber(crashClassification.ui_bug),
+      unknown: safeNumber(crashClassification.unknown),
+    },
+    timeline: {
+      faultStart: typeof timeline.fault_start === "string" ? timeline.fault_start : "",
+      firstImpact: asRecord(timeline.first_impact),
+      recovery: asRecord(timeline.recovery),
+    },
+  }
 }
 
 function phaseToKey(phase: string): "baseline" | "injecting" | "recovery" {
@@ -550,6 +679,7 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
   const [platform, setPlatform] = useState<Platform>((searchParams.get("platform") as Platform) || "backend")
   const [experiment, setExperiment] = useState<LiveExperiment | null>(null)
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
+  const [metricsSource, setMetricsSource] = useState<"report" | "status" | null>(null)
   const [connection, setConnection] = useState<"active" | "paused" | "disconnected" | "stale">("paused")
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | undefined>(undefined)
   const [stopping, setStopping] = useState(false)
@@ -637,22 +767,57 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
           }
         } else {
           const statusRes = await getAndroidExperimentStatus(id)
+          const statusAndroid = normalizeAndroidStatus(statusRes)
           nextExperiment = {
-            id: statusRes.experiment.id,
-            state: statusRes.experiment.state,
-            phase: statusRes.experiment.phase,
-            faultType: statusRes.experiment.fault_type,
-            currentIntensity: statusRes.experiment.current_intensity,
-            createdAt: new Date().toISOString(),
-            targets: [],
+            id: statusAndroid.id || id,
+            state: statusAndroid.state,
+            phase: statusAndroid.phase,
+            faultType: statusAndroid.faultType,
+            currentIntensity: statusAndroid.progressPercent,
+            maxIntensity: 100,
+            createdAt: statusAndroid.createdAt ?? new Date().toISOString(),
+            updatedAt: statusAndroid.updatedAt,
+            targets: statusAndroid.package ? [statusAndroid.package] : [],
+            package: statusAndroid.package,
+            targetType: statusAndroid.targetType,
+            observationType: statusAndroid.observationType,
+            currentState: statusAndroid.currentState,
+            healthStatus: statusAndroid.healthStatus,
+            healthSeverity: statusAndroid.healthSeverity,
+            crashReason: statusAndroid.crashReason,
+            failureType: statusAndroid.failureType,
+            scenario: statusAndroid.scenario,
+            isTerminal: statusAndroid.isTerminal,
+            durationSeconds: statusAndroid.durationSeconds,
+            elapsedMs: statusAndroid.elapsedMs,
+            faultElapsedMs: statusAndroid.faultElapsedMs,
+            phaseElapsedMs: statusAndroid.phaseElapsedMs,
+            nextFaultEtaMs: statusAndroid.nextFaultEtaMs,
+            faultsApplied: statusAndroid.faultsApplied,
+            faultsScheduled: statusAndroid.faultsScheduled,
+            impactObserved: statusAndroid.impactObserved,
+            recoveryObserved: statusAndroid.recoveryObserved,
+            validationPassed: statusAndroid.validationPassed,
           }
           setExperiment(nextExperiment)
 
           try {
             const reportRes = await getAndroidMetricsReport(id)
-            setMetrics({ kind: "android", data: reportRes })
+            console.log("📊 Android metrics response (raw):", reportRes)
+            const merged = {
+              ...(statusRes as unknown as Record<string, unknown>),
+              ...(reportRes as unknown as Record<string, unknown>),
+            }
+            setMetrics({ kind: "android", data: normalizeAndroidMetrics(merged) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
+            setMetricsSource("report")
           } catch (metricsError) {
-            console.warn("⚠️ Android metrics not ready yet:", metricsError)
+            console.warn("⚠️ Android metrics not ready as a separate report, falling back to status payload:", metricsError)
+            try {
+              setMetrics({ kind: "android", data: normalizeAndroidMetrics(statusRes as unknown as Record<string, unknown>) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
+              setMetricsSource("status")
+            } catch (e) {
+              console.warn("⚠️ Failed to normalize Android metrics from status payload:", e)
+            }
           }
         }
         setConnection("active")
@@ -867,9 +1032,36 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
               <div className="flex flex-wrap items-center gap-3">
                 <StatusIndicator status={experiment.phase} showLabel />
                 <Badge variant="outline" className="capitalize">{platform}</Badge>
-                <Badge variant="outline">Fault: {experiment.faultType}</Badge>
+                <Badge variant="outline">
+                  Fault: {experiment.faultType && experiment.faultType !== "unknown" ? experiment.faultType : (
+                    <span className="inline-block bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded font-semibold">Unclassified</span>
+                  )}
+                </Badge>
                 <Badge variant="outline">State: {experiment.state}</Badge>
               </div>
+              {platform === "android" && (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Current State</p>
+                    <p className="text-sm font-semibold capitalize">{experiment.currentState || experiment.state}</p>
+                  </div>
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Health</p>
+                    <p className="text-sm font-semibold capitalize">{experiment.healthStatus || "unknown"}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{experiment.healthSeverity || "unknown"}</p>
+                  </div>
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Progress</p>
+                    <p className="text-sm font-semibold">{Math.round(experiment.progressPercent ?? 0)}%</p>
+                    <p className="text-xs text-muted-foreground">{experiment.isTerminal ? "terminal" : "in progress"}</p>
+                  </div>
+                  <div className="rounded-lg border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Faults</p>
+                    <p className="text-sm font-semibold">{experiment.faultsApplied ?? 0} / {experiment.faultsScheduled ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">applied / scheduled</p>
+                  </div>
+                </div>
+              )}
               {typeof experiment.currentIntensity === "number" && typeof (experiment as { maxIntensity?: number }).maxIntensity === "number" && (
                 <>
                   <Progress value={(experiment.currentIntensity / Math.max(1, (experiment as { maxIntensity?: number }).maxIntensity ?? 100)) * 100} />
@@ -884,8 +1076,19 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>{chartTitle}</CardTitle>
-                <CardDescription>Phase-aligned lifecycle series</CardDescription>
+                <div className="flex items-start justify-between w-full gap-4">
+                  <div>
+                    <CardTitle className="mb-0">{chartTitle}</CardTitle>
+                    <CardDescription>Phase-aligned lifecycle series</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {platform === "android" && metricsSource && (
+                      <Badge variant="secondary" className="text-xs">
+                        {metricsSource === "report" ? "Metrics: full report" : "Metrics: status only"}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {platform === "frontend" && frontendMetricsModel ? (
@@ -963,8 +1166,85 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
                   </div>
+                ) : metrics && metrics.kind === "android" ? (
+                  (() => {
+                    const android = metrics.data as ReturnType<typeof normalizeAndroidMetrics>
+                    // Try to extract timeline data
+                    const timeline = android.timeline && (android.timeline.faultStart || Object.keys(android.timeline).length > 0) ? android.timeline : null
+                    if (timeline && timeline.faultStart) {
+                      // Build event points and render a compact line chart with colored event dots
+                      const rawPoints: Array<{ label: string; ts: string; type: string }> = []
+                      rawPoints.push({ label: "Fault Start", ts: String(timeline.faultStart), type: "fault" })
+                      if (timeline.firstImpact) {
+                        for (const v of Object.values(timeline.firstImpact)) rawPoints.push({ label: "First Impact", ts: String(v), type: "impact" })
+                      }
+                      if (timeline.recovery) {
+                        for (const v of Object.values(timeline.recovery)) rawPoints.push({ label: "Recovery", ts: String(v), type: "recovery" })
+                      }
+
+                      const points = rawPoints
+                        .map((p, idx) => ({ ...p, tsNum: Number(new Date(p.ts)), order: idx + 1 }))
+                        .filter((p) => !Number.isNaN(p.tsNum))
+                        .sort((a, b) => a.tsNum - b.tsNum)
+
+                      const colorOf = (type: string) => (type === "fault" ? "#FDE68A" : type === "impact" ? "#FECACA" : "#BBF7D0")
+                      const iconOf = (type: string) => (type === "fault" ? "⚡" : type === "impact" ? "💥" : "🩹")
+
+                      const chartData = points.map((p, idx) => ({ time: new Date(p.tsNum).toLocaleTimeString(), value: idx + 1, label: p.label, raw: p.ts, type: p.type, color: colorOf(p.type), icon: iconOf(p.type) }))
+
+                      const EventDot = ({ cx, cy, payload }: any) => {
+                        if (cx == null || cy == null) return null
+                        const r = 5
+                        return (
+                          <g>
+                            <circle cx={cx} cy={cy} r={r} fill={payload.color} stroke="#fff" strokeWidth={1.2} />
+                            <text x={cx} y={cy + 3} textAnchor="middle" fontSize={10} style={{ fontFamily: 'inherit' }}>{payload.icon}</text>
+                          </g>
+                        )
+                      }
+
+                      const uniqTypes = Array.from(new Set(chartData.map((d) => d.type)))
+
+                      return (
+                        <div className="py-0">
+                          <div className="flex items-center justify-between mb-0">
+                            <div className="text-sm font-semibold">Timeline</div>
+                          </div>
+                          <div className="h-36 max-w-full flex items-center">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={chartData} margin={{ top: 2, right: 6, left: 0, bottom: 2 }}>
+                                <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                                <YAxis hide domain={[0, chartData.length + 1]} />
+                                <Tooltip formatter={(value: any, name: any, props: any) => [props.payload.label, props.payload.raw]} labelFormatter={() => ""} />
+                                <Line type="monotone" dataKey="value" stroke="hsl(var(--muted-foreground))" dot={<EventDot />} activeDot={{ r: 10 }} strokeWidth={1.5} isAnimationActive={false} />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                            {uniqTypes.map((t) => (
+                              <div key={t} className="flex items-center gap-2">
+                                <span style={{ width: 10, height: 10, background: colorOf(t), display: 'inline-block', borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)' }} />
+                                <span className="capitalize">{t === 'fault' ? 'Fault' : t === 'impact' ? 'Impact' : 'Recovery'}</span>
+                              </div>
+                            ))}
+                            {metricsSource && (
+                              <div className="ml-4 text-[11px] text-muted-foreground">
+                                <span className="font-medium">{metricsSource === 'report' ? 'Report' : 'Status'}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div className="py-8 text-center text-sm">
+                        <span className="inline-block bg-warning/10 text-warning px-3 py-2 rounded font-semibold">No session timeline data available for this Android experiment.</span>
+                      </div>
+                    )
+                  })()
                 ) : alignedSeries.length ? (
-                  <div className="h-56">
+                  <div className="h-44">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={alignedSeries}>
                         <XAxis dataKey="label" hide />
@@ -977,8 +1257,10 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <div className="py-8 text-center text-sm text-muted-foreground">
-                    {platform === "android" ? "Android metrics report available after execution" : "No timeline data yet"}
+                  <div className="py-8 text-center text-sm">
+                    {platform === "android"
+                      ? <span className="inline-block bg-warning/10 text-warning px-3 py-2 rounded font-semibold">Android metrics report not available yet.<br/>Run the experiment and upload metrics to view the timeline.</span>
+                      : <span className="text-muted-foreground">No timeline data yet</span>}
                   </div>
                 )}
               </CardContent>
@@ -1193,6 +1475,117 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
                       )
                     })()}
                   </>
+                ) : metrics && metrics.kind === "android" ? (
+                  (() => {
+                    const android = metrics.data as ReturnType<typeof normalizeAndroidMetrics>
+                    // Only show summary if there is at least one real metric (uptime, crash rate, etc.)
+                    const hasMetrics = typeof android.uptimePercent === "number" && !isNaN(android.uptimePercent)
+                    if (!hasMetrics) {
+                      return (
+                        <div className="py-8 text-center text-sm">
+                          <span className="inline-block bg-warning/10 text-warning px-3 py-2 rounded font-semibold">Android metrics report not available yet.<br/>Run the experiment and upload metrics to view the summary.</span>
+                        </div>
+                      )
+                    }
+                    return (
+                      <>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Blast Radius</p>
+                            <p className="text-xl font-semibold">{android.blastRadius}%</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Cascade Depth</p>
+                            <p className="text-xl font-semibold">{android.cascadeDepth}</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Health</p>
+                            <p className="text-xl font-semibold capitalize">{android.status}</p>
+                            <p className="text-xs text-muted-foreground capitalize">{android.severity}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Recovery</p>
+                            <p className="text-lg font-semibold">
+                              {android.recovered ? "recovered" : "not recovered"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {android.recoveryTimeMs}ms, {android.autoRecovered ? "auto" : "manual"}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Validation</p>
+                            <p className="text-lg font-semibold">{android.validationPassed ? "passed" : "failed"}</p>
+                            <p className="text-xs text-muted-foreground">configured: {android.validationConfigured ? "yes" : "no"}</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Scenario</p>
+                            <p className="text-lg font-semibold capitalize truncate break-all" title={android.scenario || "unknown"}>{android.scenario || "unknown"}</p>
+                            <p className="text-xs text-muted-foreground">{android.replayHintsCount} replay hints</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Uptime</p>
+                            <p className="text-lg font-semibold truncate break-all" title={String(android.uptimePercent)}>{android.uptimePercent}%</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Crash Rate</p>
+                            <p className="text-lg font-semibold truncate break-all" title={String(android.crashRatePercent)}>{android.crashRatePercent}%</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">ANR / Restarts</p>
+                            <p className="text-lg font-semibold truncate break-all" title={`${android.anrDetected ? "ANR detected" : "no ANR"} / ${android.unexpectedRestarts}`}>{android.anrDetected ? "ANR detected" : "no ANR"} / {android.unexpectedRestarts}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Expected Running</p>
+                            <p className="text-lg font-semibold">{String(android.expected.running ?? false)}</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Expected Recover</p>
+                            <p className="text-lg font-semibold">{String(android.expected.should_recover ?? false)}</p>
+                          </div>
+                          <div className="rounded-lg border border-border p-3">
+                            <p className="text-xs text-muted-foreground">Crash Reason</p>
+                            <p className="text-lg font-semibold truncate break-all" title={android.crashReason || "none"}>{android.crashReason || "none"}</p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground space-y-3 break-words">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">Summary</span>
+                            {android.summaryResult?.toLowerCase() === "pass" ? (
+                              <span className="inline-block rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">PASS</span>
+                            ) : android.summaryResult?.toLowerCase() === "fail" ? (
+                              <span className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">FAIL</span>
+                            ) : null}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-foreground">Reason: </span>
+                            <span>{android.summaryReason || <span className="italic">No reason available.</span>}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-foreground">Suggestion: </span>
+                            <span>{android.summarySuggestion || <span className="italic">No suggestion available.</span>}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-foreground">Timeline Fault Start: </span>
+                            <span>{android.timeline.faultStart || <span className="italic">n/a</span>}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-foreground">Validation Reasons: </span>
+                            <span>{android.validationReasons.length > 0 ? android.validationReasons.join(", ") : <span className="italic">none</span>}</span>
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()
                 ) : (
                   <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs text-muted-foreground">{JSON.stringify(metrics.data, null, 2)}</pre>
                 )}

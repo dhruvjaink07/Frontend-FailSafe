@@ -44,6 +44,7 @@ function LogsPageContent() {
   const [endpoint, setEndpoint] = useState(searchParams.get("endpoint") ?? "")
   const [status, setStatus] = useState(searchParams.get("status") ?? "")
   const [timeRange, setTimeRange] = useState(searchParams.get("timeRange") ?? "1h")
+  const [experimentId, setExperimentId] = useState(searchParams.get("id") ?? "")
   const [query, setQuery] = useState(searchParams.get("q") ?? "")
 
   const updateUrl = useCallback((next: { endpoint?: string; status?: string; timeRange?: string; q?: string }) => {
@@ -62,7 +63,7 @@ function LogsPageContent() {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const data = await getLogs({ endpoint, status, timeRange })
+      const data = await getLogs({ endpoint, status, timeRange, experimentId })
       setError(null)
       setLogs(data.slice(-config.MAX_LOG_ENTRIES))
     } catch (err) {
@@ -70,7 +71,7 @@ function LogsPageContent() {
       setError(parsed.message)
       throw err
     }
-  }, [endpoint, status, timeRange])
+  }, [endpoint, status, timeRange, experimentId])
 
   useEffect(() => {
     fetchLogs().catch(() => {})
@@ -93,6 +94,16 @@ function LogsPageContent() {
     scrollRef.current.scrollTop = 0
   }, [logs, autoScroll])
 
+  // fetch list of recent experiments to populate a selector for quick navigation
+  const [experimentsList, setExperimentsList] = useState<Array<{ id: string; target_type: string }>>([])
+  useEffect(() => {
+    import('@/lib/api').then(({ getExperimentHistory }) => {
+      getExperimentHistory({ limit: 20 }).then((resp) => {
+        setExperimentsList(resp.items.map((it) => ({ id: it.experiment.id, target_type: it.experiment.target_type })))
+      }).catch(() => {})
+    })
+  }, [])
+
   const filtered = useMemo(() => {
     return logs.filter((entry) => {
       const textMatch = !query || entry.message.toLowerCase().includes(query.toLowerCase()) || entry.endpoint.toLowerCase().includes(query.toLowerCase())
@@ -100,6 +111,24 @@ function LogsPageContent() {
       return textMatch && degradedMatch
     })
   }, [logs, query, status])
+
+  // Collapse consecutive identical log lines into a single display entry with a count
+  const collapsed = useMemo(() => {
+    if (!filtered.length) return [] as Array<LogEntry & { count?: number }>
+    const out: Array<LogEntry & { count?: number }> = []
+    let prev: (LogEntry & { count?: number }) | null = null
+    for (const e of filtered) {
+      if (prev && prev.message === e.message && prev.endpoint === e.endpoint && prev.level === e.level) {
+        prev.count = (prev.count || 1) + 1
+      } else {
+        const copy: LogEntry & { count?: number } = { ...e }
+        copy.count = 1
+        out.push(copy)
+        prev = copy
+      }
+    }
+    return out
+  }, [filtered])
 
   const endpoints = useMemo(() => [...new Set(logs.map((item) => item.endpoint))], [logs])
 
@@ -184,6 +213,18 @@ function LogsPageContent() {
                     </SelectContent>
                   </Select>
 
+                  <div className="min-w-[160px]">
+                    <Select value={experimentId || "all"} onValueChange={(val) => { const next = val === "all" ? "" : val; setExperimentId(next); updateUrl({ endpoint, status, timeRange, q: query }) }}>
+                      <SelectTrigger className="w-full sm:w-56"><SelectValue placeholder="Experiment" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Experiments</SelectItem>
+                        {experimentsList.map((exp) => (
+                          <SelectItem key={exp.id} value={exp.id}>{exp.id} ({exp.target_type})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button variant="outline" size="icon" className="shrink-0" onClick={() => setStreaming((current) => !current)}>
                     {streaming ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </Button>
@@ -227,14 +268,17 @@ function LogsPageContent() {
                 </div>
               ) : (
                 <div ref={scrollRef} className="h-[600px] overflow-y-auto rounded-lg border border-border bg-muted/20 font-mono text-xs">
-                  {filtered.map((entry) => (
-                    <div key={entry.id} className="flex flex-col gap-1 border-b border-border/50 px-3 py-2 last:border-0 sm:flex-row sm:gap-3">
-                      <span className="text-muted-foreground">{formatClock(entry.timestamp)}</span>
-                      <span className="w-14 uppercase text-muted-foreground sm:text-right">{entry.level}</span>
-                      <span className="break-all text-primary">{entry.endpoint}</span>
-                      <span className="flex-1">{entry.message}</span>
-                    </div>
-                  ))}
+                      {collapsed.map((entry) => (
+                        <div key={entry.id} className="flex flex-col gap-1 border-b border-border/50 px-3 py-2 last:border-0 sm:flex-row sm:gap-3">
+                          <span className="text-muted-foreground">{formatClock(entry.timestamp)}</span>
+                          <span className="w-14 uppercase text-muted-foreground sm:text-right">{entry.level}</span>
+                          <span className="break-all text-primary">{entry.endpoint}</span>
+                          <span className="flex-1">{entry.message}</span>
+                          {entry.count && entry.count > 1 && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs">×{entry.count}</span>
+                          )}
+                        </div>
+                      ))}
                 </div>
               )}
             </CardContent>

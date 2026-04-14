@@ -1,5 +1,5 @@
 export const features = {
-  android: process.env.NEXT_PUBLIC_FEATURE_ANDROID === "true",
+  android: process.env.NEXT_PUBLIC_FEATURE_ANDROID !== "false",
   frontend: process.env.NEXT_PUBLIC_FEATURE_FRONTEND !== "false",
   backend: process.env.NEXT_PUBLIC_FEATURE_BACKEND !== "false",
 } as const

@@ -1,6 +1,35 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {CSS} from '@dnd-kit/utilities';
+// Draggable scenario step wrapper for dnd-kit
+function DraggableScenarioStep({ id, children }: { id: string, children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined,
+    opacity: isDragging ? 0.7 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -60,6 +89,99 @@ const faultTypeSets: Record<Platform, { value: FaultType; label: string; descrip
 
 type RequestMode = "form" | "json"
 
+type AndroidScenarioStep = {
+  type: string
+  at: number
+  duration_seconds: number
+}
+
+const androidScenarioTypeOptions = [
+  "kill_app",
+  "foreground_app",
+  "network_disable",
+  "network_enable",
+  "network_flaky",
+  "network_latency",
+  "revoke_camera",
+  "revoke_location",
+  "battery_drain",
+] as const
+
+const androidScenarioTypeMeta: Record<(typeof androidScenarioTypeOptions)[number], { label: string; description: string }> = {
+  kill_app: { label: "Kill App", description: "Force stop the app process." },
+  foreground_app: { label: "Foreground App", description: "Bring the app back to foreground." },
+  network_disable: { label: "Disable Network", description: "Turn off network connectivity." },
+  network_enable: { label: "Enable Network", description: "Restore network connectivity." },
+  network_flaky: { label: "Flaky Network", description: "Introduce intermittent packet drop and jitter." },
+  network_latency: { label: "High Latency", description: "Inject latency into network traffic." },
+  revoke_camera: { label: "Revoke Camera", description: "Remove camera permission during runtime." },
+  revoke_location: { label: "Revoke Location", description: "Remove location permission during runtime." },
+  battery_drain: { label: "Battery Drain", description: "Simulate low battery pressure." },
+}
+
+function getAndroidScenarioMeta(type: string): { label: string; description: string } {
+  const known = androidScenarioTypeMeta[type as keyof typeof androidScenarioTypeMeta]
+  if (known) return known
+
+  return {
+    label: type.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()),
+    description: "Custom scenario step",
+  }
+}
+
+function buildAndroidScenarioPreset(fault: FaultType, totalDuration: number): AndroidScenarioStep[] {
+  const cap = Math.max(totalDuration, 30)
+
+  if (fault === "network_disable") {
+    return [
+      { type: "network_disable", at: 8, duration_seconds: 8 },
+      { type: "network_enable", at: 18, duration_seconds: 1 },
+      { type: "network_flaky", at: 28, duration_seconds: 12 },
+      { type: "network_latency", at: 46, duration_seconds: 8 },
+    ].filter((step) => step.at < cap)
+  }
+
+  if (fault === "network_latency") {
+    return [
+      { type: "network_latency", at: 10, duration_seconds: 10 },
+      { type: "network_latency", at: 28, duration_seconds: 12 },
+      { type: "kill_app", at: 46, duration_seconds: 1 },
+      { type: "foreground_app", at: 52, duration_seconds: 2 },
+    ].filter((step) => step.at < cap)
+  }
+
+  if (fault === "revoke_camera") {
+    return [
+      { type: "revoke_camera", at: 8, duration_seconds: 12 },
+      { type: "foreground_app", at: 24, duration_seconds: 2 },
+      { type: "network_latency", at: 36, duration_seconds: 8 },
+    ].filter((step) => step.at < cap)
+  }
+
+  if (fault === "revoke_location") {
+    return [
+      { type: "revoke_location", at: 8, duration_seconds: 12 },
+      { type: "network_disable", at: 24, duration_seconds: 6 },
+      { type: "network_enable", at: 31, duration_seconds: 1 },
+    ].filter((step) => step.at < cap)
+  }
+
+  if (fault === "battery_drain") {
+    return [
+      { type: "battery_drain", at: 10, duration_seconds: 24 },
+      { type: "network_latency", at: 38, duration_seconds: 10 },
+      { type: "kill_app", at: 54, duration_seconds: 1 },
+      { type: "foreground_app", at: 60, duration_seconds: 2 },
+    ].filter((step) => step.at < cap)
+  }
+
+  return [
+    { type: "kill_app", at: 20, duration_seconds: 1 },
+    { type: "foreground_app", at: 30, duration_seconds: 2 },
+    { type: "network_latency", at: 42, duration_seconds: 8 },
+  ].filter((step) => step.at < cap)
+}
+
 function buildRequestTemplate(values: {
   name: string
   platform: Platform
@@ -81,6 +203,7 @@ function buildRequestTemplate(values: {
   androidAvdName: string
   androidHeadless: boolean
   androidResetAppState: boolean
+  androidScenarios: AndroidScenarioStep[]
 }) {
   const frontendTargets = values.frontendTargetUrl
     .split(",")
@@ -140,6 +263,7 @@ function buildRequestTemplate(values: {
         headless: values.androidHeadless,
         resetAppState: values.androidResetAppState,
       },
+      scenarios: values.androidScenarios,
     },
     null,
     2,
@@ -147,6 +271,8 @@ function buildRequestTemplate(values: {
 }
 
 export default function CreateExperimentPage() {
+  // dnd-kit sensors for Android scenario drag-and-drop
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -172,8 +298,13 @@ export default function CreateExperimentPage() {
   const [androidAvdName, setAndroidAvdName] = useState("Pixel_8a")
   const [androidHeadless, setAndroidHeadless] = useState(true)
   const [androidResetAppState, setAndroidResetAppState] = useState(true)
+  const [androidScenarios, setAndroidScenarios] = useState<AndroidScenarioStep[]>(
+    buildAndroidScenarioPreset("kill_app", 300),
+  )
   const [androidUploading, setAndroidUploading] = useState(false)
   const [androidUploadLabel, setAndroidUploadLabel] = useState<string | null>(null)
+  const [androidUploadedPackage, setAndroidUploadedPackage] = useState("")
+  const [androidUploadedActivity, setAndroidUploadedActivity] = useState("")
   const [rawRequestJson, setRawRequestJson] = useState("")
   const androidFileInputRef = useRef<HTMLInputElement | null>(null)
   const backendContainers = useAppStore((state) => state.backendContainers ?? [])
@@ -200,6 +331,12 @@ export default function CreateExperimentPage() {
   )
   const formTargets = platform === "frontend" ? frontendTargetUrls : targets
 
+  useEffect(() => {
+    if (platform !== "android") return
+    if (androidScenarios.length > 0) return
+    setAndroidScenarios(buildAndroidScenarioPreset(faultType, duration))
+  }, [platform, androidScenarios.length, faultType, duration])
+
   const addTarget = () => {
     if (targetInput.trim() && !targets.includes(targetInput.trim())) {
       setTargets([...targets, targetInput.trim()])
@@ -225,6 +362,33 @@ export default function CreateExperimentPage() {
 
   const clearBackendTargets = () => setTargets([])
 
+  const addAndroidScenario = () => {
+    setAndroidScenarios((current) => [
+      ...current,
+      {
+        type: androidScenarioTypeOptions[0],
+        at: Math.min(Math.max(5, current.length * 10 + 10), Math.max(duration - 1, 5)),
+        duration_seconds: 5,
+      },
+    ])
+  }
+
+  const removeAndroidScenario = (index: number) => {
+    setAndroidScenarios((current) => current.filter((_, currentIndex) => currentIndex !== index))
+  }
+
+  const updateAndroidScenario = (index: number, patch: Partial<AndroidScenarioStep>) => {
+    setAndroidScenarios((current) => current.map((step, currentIndex) => (currentIndex === index ? { ...step, ...patch } : step)))
+  }
+
+  const applyAndroidScenarioPreset = () => {
+    setAndroidScenarios(buildAndroidScenarioPreset(faultType, duration))
+  }
+
+  const sortAndroidScenarios = () => {
+    setAndroidScenarios((current) => [...current].sort((left, right) => left.at - right.at))
+  }
+
   const requestTemplate = useMemo(
     () =>
       buildRequestTemplate({
@@ -248,6 +412,7 @@ export default function CreateExperimentPage() {
         androidAvdName,
         androidHeadless,
         androidResetAppState,
+        androidScenarios,
       }),
     [
       name,
@@ -270,6 +435,7 @@ export default function CreateExperimentPage() {
       androidAvdName,
       androidHeadless,
       androidResetAppState,
+      androidScenarios,
     ],
   )
 
@@ -292,7 +458,14 @@ export default function CreateExperimentPage() {
       formData.append("file", file)
       const uploaded = await uploadAndroidApk(formData)
       setAndroidApkId(uploaded.id)
+      setAndroidUploadedPackage(uploaded.package)
+      setAndroidUploadedActivity(uploaded.activity)
       setAndroidUploadLabel(`${uploaded.package} (${uploaded.activity})`)
+      const uploadedPackage = uploaded.package?.trim()
+      if (uploadedPackage) {
+        setTargets((current) => (current.includes(uploadedPackage) ? current : [...current, uploadedPackage]))
+      }
+      setTargetInput("")
     } catch (uploadError) {
       console.error("Failed to upload APK:", uploadError)
       setError("Failed to upload APK")
@@ -366,6 +539,11 @@ export default function CreateExperimentPage() {
                           headless: androidHeadless,
                           resetAppState: androidResetAppState,
                         },
+                        scenarios: androidScenarios.map((scenario) => ({
+                          type: scenario.type,
+                          at: scenario.at,
+                          duration_seconds: scenario.duration_seconds,
+                        })),
                       }
 
               const validation = validateExperimentForm(payload)
@@ -414,6 +592,13 @@ export default function CreateExperimentPage() {
                         headless: androidHeadless,
                         reset_app_state: androidResetAppState,
                       },
+                      scenarios: androidScenarios
+                        .map((scenario) => ({
+                          type: scenario.type,
+                          at: Math.max(0, Math.min(duration - 1, Math.floor(scenario.at))),
+                          duration_seconds: Math.max(1, Math.floor(scenario.duration_seconds)),
+                        }))
+                        .sort((a, b) => a.at - b.at),
                       expected: {
                         running: true,
                         not_crash: notCrash,
@@ -499,21 +684,81 @@ export default function CreateExperimentPage() {
             <CardContent className="space-y-4">
               {requestMode === "json" ? (
                 <div className="space-y-4">
-                  <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-                    Paste the exact start payload. The selected platform decides which backend start endpoint receives it.
-                  </div>
-                  <Textarea
-                    value={rawRequestJson}
-                    onChange={(event) => setRawRequestJson(event.target.value)}
-                    className="min-h-[420px] font-mono text-xs"
-                    placeholder={requestTemplate}
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="button" variant="outline" onClick={() => setRawRequestJson(requestTemplate)}>
-                      Load current form as JSON
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={() => setRawRequestJson("")}>Clear</Button>
-                  </div>
+                  {platform === "android" ? (
+                    <>
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">Step 1</Badge>
+                          <p className="text-sm font-medium">Upload APK</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Android upload uses multipart form data. Upload here to get APK id and package, then use them in start payload.
+                        </p>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="android-apk-file-raw">APK File</Label>
+                            <Input id="android-apk-file-raw" ref={androidFileInputRef} type="file" accept=".apk" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="android-apk-id-raw">Uploaded APK ID</Label>
+                            <Input id="android-apk-id-raw" value={androidApkId} onChange={(e) => setAndroidApkId(e.target.value)} placeholder="Upload or paste APK ID" />
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                          <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={handleAndroidApkUpload} disabled={androidUploading}>
+                            {androidUploading ? "Uploading..." : "Upload APK"}
+                          </Button>
+                          {androidUploadLabel && <Badge variant="outline">{androidUploadLabel}</Badge>}
+                        </div>
+                        {(androidUploadedPackage || androidUploadedActivity) && (
+                          <div className="rounded-md border border-border bg-background p-3 text-xs text-muted-foreground">
+                            <p>package: {androidUploadedPackage || "-"}</p>
+                            <p>activity: {androidUploadedActivity || "-"}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">Step 2</Badge>
+                          <p className="text-sm font-medium">Start Experiment Payload (JSON)</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Paste the exact start payload. This section sends JSON to the Android start endpoint.
+                        </p>
+                        <Textarea
+                          value={rawRequestJson}
+                          onChange={(event) => setRawRequestJson(event.target.value)}
+                          className="min-h-[420px] font-mono text-xs"
+                          placeholder={requestTemplate}
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button type="button" variant="outline" onClick={() => setRawRequestJson(requestTemplate)}>
+                            Load current form as JSON
+                          </Button>
+                          <Button type="button" variant="ghost" onClick={() => setRawRequestJson("")}>Clear</Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                        Paste the exact start payload. The selected platform decides which backend start endpoint receives it.
+                      </div>
+                      <Textarea
+                        value={rawRequestJson}
+                        onChange={(event) => setRawRequestJson(event.target.value)}
+                        className="min-h-[420px] font-mono text-xs"
+                        placeholder={requestTemplate}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" onClick={() => setRawRequestJson(requestTemplate)}>
+                          Load current form as JSON
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => setRawRequestJson("")}>Clear</Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                     <div className="space-y-4">
@@ -538,6 +783,78 @@ export default function CreateExperimentPage() {
                           <p className="text-xs text-muted-foreground">
                             Comma-separated paths or URLs the frontend runner should navigate.
                           </p>
+                        </div>
+                      ) : platform === "android" ? (
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Target App Package(s)</Label>
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                              <Input
+                                placeholder="e.g., com.example.code"
+                                value={targetInput}
+                                onChange={(e) => setTargetInput(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTarget())}
+                              />
+                              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={addTarget}>
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Add one or more Android package names to monitor during the run.
+                            </p>
+                            {targets.length > 0 && (
+                              <div className="flex flex-wrap gap-2 pt-2">
+                                {targets.map((target) => (
+                                  <Badge key={target} variant="secondary" className="gap-1">
+                                    <Target className="h-3 w-3" />
+                                    {target}
+                                    <button onClick={() => removeTarget(target)} className="ml-1 hover:text-destructive">
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+                            <div className="grid gap-4 lg:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label htmlFor="android-apk-file">APK File</Label>
+                                <Input id="android-apk-file" ref={androidFileInputRef} type="file" accept=".apk" />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="android-apk-id">Uploaded APK ID</Label>
+                                <Input id="android-apk-id" value={androidApkId} onChange={(e) => setAndroidApkId(e.target.value)} placeholder="Upload or paste APK ID" />
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={handleAndroidApkUpload} disabled={androidUploading}>
+                                {androidUploading ? "Uploading..." : "Upload APK"}
+                              </Button>
+                              {androidUploadLabel && <Badge variant="outline">{androidUploadLabel}</Badge>}
+                            </div>
+                            <div className="grid gap-4 lg:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label htmlFor="android-avd">AVD Name</Label>
+                                <Input id="android-avd" value={androidAvdName} onChange={(e) => setAndroidAvdName(e.target.value)} />
+                              </div>
+                              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                                <div>
+                                  <p className="font-medium">Headless Emulator</p>
+                                  <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                                </div>
+                                <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                              <div>
+                                <p className="font-medium">Reset App State</p>
+                                <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                              </div>
+                              <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -759,47 +1076,6 @@ export default function CreateExperimentPage() {
                     </div>
                   )}
 
-                  {platform === "android" && (
-                    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="android-apk-file">APK File</Label>
-                          <Input id="android-apk-file" ref={androidFileInputRef} type="file" accept=".apk" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="android-apk-id">Uploaded APK ID</Label>
-                          <Input id="android-apk-id" value={androidApkId} onChange={(e) => setAndroidApkId(e.target.value)} placeholder="Upload or paste APK ID" />
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={handleAndroidApkUpload} disabled={androidUploading}>
-                          {androidUploading ? "Uploading..." : "Upload APK"}
-                        </Button>
-                        {androidUploadLabel && <Badge variant="outline">{androidUploadLabel}</Badge>}
-                      </div>
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="android-avd">AVD Name</Label>
-                          <Input id="android-avd" value={androidAvdName} onChange={(e) => setAndroidAvdName(e.target.value)} />
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                          <div>
-                            <p className="font-medium">Headless Emulator</p>
-                            <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
-                          </div>
-                          <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                        <div>
-                          <p className="font-medium">Reset App State</p>
-                          <p className="text-sm text-muted-foreground">Clear app state before starting</p>
-                        </div>
-                        <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
-                      </div>
-                    </div>
-                  )}
-
                   <div className="grid gap-6 lg:grid-cols-2">
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
@@ -864,21 +1140,100 @@ export default function CreateExperimentPage() {
                   )}
 
                   {platform === "android" && (
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <p className="font-medium">Headless Emulator</p>
-                          <p className="text-sm text-muted-foreground">Run without UI for CI/test stability</p>
+                          <p className="font-medium">Scenario Timeline</p>
+                          <p className="text-sm text-muted-foreground">Design a multi-step mobile chaos sequence with ordered events.</p>
                         </div>
-                        <Switch checked={androidHeadless} onCheckedChange={setAndroidHeadless} />
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                        <div>
-                          <p className="font-medium">Reset App State</p>
-                          <p className="text-sm text-muted-foreground">Clear app state before starting</p>
+                        <div className="flex items-center gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={applyAndroidScenarioPreset}>
+                            Apply Creative Preset
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={sortAndroidScenarios}>
+                            Sort by Time
+                          </Button>
+                          <Button type="button" variant="secondary" size="sm" onClick={addAndroidScenario}>
+                            Add Step
+                          </Button>
                         </div>
-                        <Switch checked={androidResetAppState} onCheckedChange={setAndroidResetAppState} />
                       </div>
+
+                      {androidScenarios.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No scenario steps yet. Add one or apply a preset.</p>
+                      ) : (
+                        <DndContext
+                          sensors={dndSensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={({ active, over }) => {
+                            if (over && active.id !== over.id) {
+                              const oldIndex = androidScenarios.findIndex((_, i) => `${androidScenarios[i].type}-${i}` === active.id);
+                              const newIndex = androidScenarios.findIndex((_, i) => `${androidScenarios[i].type}-${i}` === over.id);
+                              if (oldIndex !== -1 && newIndex !== -1) {
+                                setAndroidScenarios((current) => arrayMove(current, oldIndex, newIndex));
+                              }
+                            }
+                          }}
+                        >
+                          <SortableContext
+                            items={androidScenarios.map((_, i) => `${androidScenarios[i].type}-${i}`)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <div className="space-y-3">
+                              {androidScenarios.map((scenario, index) => (
+                                <DraggableScenarioStep key={`${scenario.type}-${index}`} id={`${scenario.type}-${index}`}>
+                                  <div className="grid gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-[auto_2fr_1fr_1fr_auto] md:items-end cursor-move">
+                                    <div className="flex items-center md:pb-2">
+                                      <Badge variant="outline">#{index + 1}</Badge>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label>Step Type</Label>
+                                      <select
+                                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                        value={scenario.type}
+                                        onChange={(event) => updateAndroidScenario(index, { type: event.target.value })}
+                                      >
+                                        {androidScenarioTypeOptions.map((option) => (
+                                          <option key={option} value={option}>{androidScenarioTypeMeta[option].label}</option>
+                                        ))}
+                                      </select>
+                                      <p className="text-xs text-muted-foreground">{getAndroidScenarioMeta(scenario.type).description}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label>At (sec)</Label>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        max={Math.max(duration - 1, 0)}
+                                        value={scenario.at}
+                                        onChange={(event) => updateAndroidScenario(index, { at: Number(event.target.value) || 0 })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label>Step Duration (sec)</Label>
+                                      <Input
+                                        type="number"
+                                        min={1}
+                                        max={Math.max(duration, 1)}
+                                        value={scenario.duration_seconds}
+                                        onChange={(event) => updateAndroidScenario(index, { duration_seconds: Number(event.target.value) || 1 })}
+                                      />
+                                    </div>
+                                    <div className="flex items-end md:justify-end">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => removeAndroidScenario(index)} aria-label={`Remove step ${index + 1}`}>
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </DraggableScenarioStep>
+                              ))}
+                            </div>
+                          </SortableContext>
+                        </DndContext>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Steps are sent in timeline order and automatically normalized to fit inside the test duration.
+                      </p>
                     </div>
                   )}
                 </CardContent>
@@ -931,7 +1286,12 @@ export default function CreateExperimentPage() {
               disabled={
                 loading ||
                 (requestMode === "form"
-                  ? !name || (platform === "frontend" ? frontendTargetUrls.length === 0 : targets.length === 0)
+                  ? !name ||
+                    (platform === "frontend"
+                      ? frontendTargetUrls.length === 0
+                      : platform === "android"
+                        ? targets.length === 0 || !androidApkId.trim() || androidScenarios.length === 0
+                        : targets.length === 0)
                   : !rawRequestJson.trim())
               }
             >

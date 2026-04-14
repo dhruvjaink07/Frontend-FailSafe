@@ -22,28 +22,60 @@ import type { Experiment, SystemMetrics } from "@/lib/store"
 export default function DashboardPage() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [metricsError, setMetricsError] = useState<string | null>(null)
+  const [experimentsLoading, setExperimentsLoading] = useState(true)
+  const [metricsLoading, setMetricsLoading] = useState(true)
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [expData, metricsData] = await Promise.all([
-          getExperiments(),
-          getSystemMetrics(),
-        ])
+    let cancelled = false
 
-        setExperiments(expData)
-        setSystemMetrics(metricsData)
+    async function fetchExperiments() {
+      try {
+        const expData = await getExperiments()
+        if (!cancelled) {
+          setExperiments(expData)
+        }
       } catch (error) {
-        console.error("Failed to fetch dashboard data:", error)
+        console.error("Failed to fetch dashboard experiments:", error)
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setExperimentsLoading(false)
+        }
       }
     }
 
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
+    async function fetchMetrics() {
+      try {
+        const metricsData = await getSystemMetrics()
+        if (!cancelled) {
+          setSystemMetrics(metricsData)
+          setMetricsError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "Failed to load system metrics"
+          console.error("Failed to fetch dashboard metrics:", error)
+          setSystemMetrics(null)
+          setMetricsError(message)
+        }
+      } finally {
+        if (!cancelled) {
+          setMetricsLoading(false)
+        }
+      }
+    }
+
+    fetchExperiments()
+    fetchMetrics()
+
+    const experimentsInterval = setInterval(fetchExperiments, 5000)
+    const metricsInterval = setInterval(fetchMetrics, 30000)
+
+    return () => {
+      cancelled = true
+      clearInterval(experimentsInterval)
+      clearInterval(metricsInterval)
+    }
   }, [])
 
   const activeExperiments = experiments.filter(
@@ -51,6 +83,7 @@ export default function DashboardPage() {
   )
   const completedCount = experiments.filter(e => e.phase === "completed").length
   const failedCount = experiments.filter(e => e.phase === "failed").length
+  const metricsUnavailable = !metricsLoading && systemMetrics === null
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -74,6 +107,30 @@ export default function DashboardPage() {
         <div className="mx-auto max-w-7xl space-y-6">
           <ConnectionStatusCard />
 
+          {metricsUnavailable ? (
+            <Card className="border-warning/30 bg-warning/5">
+              <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <AlertTriangle className="h-4 w-4 text-warning" />
+                    System metrics unavailable
+                  </CardTitle>
+                  <CardDescription>
+                    The dashboard is still loading experiments, but the system metrics endpoint is returning an error.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="border-warning/30 text-warning">
+                  Degraded
+                </Badge>
+              </CardHeader>
+              {metricsError ? (
+                <CardContent className="pt-0 text-sm text-muted-foreground">
+                  {metricsError}
+                </CardContent>
+              ) : null}
+            </Card>
+          ) : null}
+
           {/* Stats Cards */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
@@ -84,7 +141,9 @@ export default function DashboardPage() {
                 <FlaskConical className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{activeExperiments.length}</div>
+                <div className="text-2xl font-bold">
+                  {experimentsLoading ? "..." : activeExperiments.length}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {completedCount} completed, {failedCount} failed
                 </p>
@@ -100,10 +159,10 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {loading ? "..." : `${systemMetrics?.blastRadius ?? 0}%`}
+                  {metricsLoading ? "..." : systemMetrics ? `${systemMetrics.blastRadius}%` : "N/A"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Affected system surface
+                  {systemMetrics ? "Affected system surface" : "Metrics unavailable"}
                 </p>
               </CardContent>
             </Card>
@@ -117,10 +176,10 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {loading ? "..." : systemMetrics?.cascadeDepth ?? 0}
+                  {metricsLoading ? "..." : systemMetrics ? systemMetrics.cascadeDepth : "N/A"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Failure propagation levels
+                  {systemMetrics ? "Failure propagation levels" : "Metrics unavailable"}
                 </p>
               </CardContent>
             </Card>
@@ -135,12 +194,12 @@ export default function DashboardPage() {
               <CardContent>
                 <Badge 
                   variant="outline" 
-                  className={getSeverityColor(systemMetrics?.severity || "low")}
+                  className={getSeverityColor(systemMetrics?.severity || (metricsUnavailable ? "unknown" : "low"))}
                 >
-                  {loading ? "..." : systemMetrics?.severity?.toUpperCase() ?? "LOW"}
+                  {metricsLoading ? "..." : systemMetrics?.severity?.toUpperCase() ?? "UNAVAILABLE"}
                 </Badge>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Current system state
+                  {systemMetrics ? "Current system state" : "System metrics endpoint unavailable"}
                 </p>
               </CardContent>
             </Card>
@@ -165,7 +224,7 @@ export default function DashboardPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {loading ? (
+              {experimentsLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                 </div>

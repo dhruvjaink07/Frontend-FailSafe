@@ -103,6 +103,38 @@ function mapBackendMetrics(payload: BackendMetrics) {
   }
 }
 
+function mapAndroidMetrics(payload: Record<string, unknown>) {
+  const asNumber = (k: string, fallback = 0) => Number((payload as any)[k] ?? fallback)
+  const resilience = (payload.resilience_threshold as Record<string, unknown>) || {}
+  const steps = Array.isArray(resilience.intensity_steps) ? (resilience.intensity_steps as number[]) : []
+
+  const baseline = 0
+  const injecting = Number(resilience.max_stable_intensity ?? resilience.breaking_intensity ?? 0)
+  const recovery = 0
+
+  const intensityHistory =
+    steps.length > 0
+      ? steps.map((value, index) => ({ timestamp: new Date(Date.now() - (steps.length - index) * 10000).toISOString(), value, phase: index === 0 ? "baseline" : index === steps.length - 1 ? "recovering" : "injecting" }))
+      : [
+          { timestamp: new Date(Date.now() - 120000).toISOString(), value: baseline, phase: "baseline" },
+          { timestamp: new Date(Date.now() - 60000).toISOString(), value: injecting, phase: "injecting" },
+          { timestamp: new Date().toISOString(), value: recovery, phase: "recovering" },
+        ]
+
+  const system = {
+    blastRadius: Number((payload.blast_radius_percent as number) ?? 0),
+    cascadeDepth: Number((payload.cascade_depth as number) ?? 0),
+    severity: normalizeSeverity((payload as any).severity ?? (payload.health && (payload.health as any).severity) ?? "low"),
+  }
+
+  return {
+    system,
+    endpoints: [],
+    intensityHistory,
+    raw: payload,
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -145,12 +177,7 @@ export async function GET(
     )
     if (androidRes.ok) {
       const payload = (await androidRes.json()) as Record<string, unknown>
-      return NextResponse.json({
-        system: { blastRadius: 0, cascadeDepth: 0, severity: "low" },
-        endpoints: [],
-        intensityHistory: [],
-        raw: payload,
-      })
+      return NextResponse.json(mapAndroidMetrics(payload))
     }
 
     return NextResponse.json(

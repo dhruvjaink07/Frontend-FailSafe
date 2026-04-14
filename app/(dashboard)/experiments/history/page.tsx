@@ -331,6 +331,11 @@ function HistoryPageContent() {
                                       View
                                     </Link>
                                   </Button>
+                                  <Button variant="ghost" size="sm" asChild>
+                                    <Link href={`/logs?id=${item.experiment.id}&timeRange=1h`}>
+                                      Logs
+                                    </Link>
+                                  </Button>
                                 </div>
                               </TableCell>
                             </TableRow>

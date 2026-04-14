@@ -188,18 +188,159 @@ export interface AndroidExperimentResponse {
 }
 
 export interface AndroidStatusResponse {
-  experiment: {
-    id: string
-    state: "running" | "completed" | "failed"
-    phase: "baseline" | "injecting" | "recovering" | "completed"
-    fault_type: string
+  id: string
+  state: "running" | "completed" | "failed"
+  phase: "baseline" | "injecting" | "recovering" | "completed"
+  fault_type: string
+  current_state?: string
+  observation_type?: string
+  target_type?: string
+  package?: string
+  created_at?: string
+  updated_at?: string
+  current_sample_at?: string
+  current_intensity?: number
+  is_terminal?: boolean
+  next_fault?: string | null
+  next_fault_eta_ms?: number
+  server_time?: string
+  faults?: {
+    applied?: number
+    scheduled?: number
+    events?: Array<{
+      at?: string
+      at_ms?: number
+      in_phase?: string
+      type?: string
+    }>
+  }
+  health?: {
+    status?: string
+    severity?: string
+    failure_type?: string
+    crash_reason?: string
+    thread?: string
+  }
+  progress?: {
+    completed_percent_of_plan?: number
+    duration_seconds?: number
+    elapsed_ms?: number
+    fault_elapsed_ms?: number
+    phase_elapsed_ms?: number
+  }
+  state_transitions?: unknown[]
+  timeline?: {
+    fault_start?: string
+    first_impact?: Record<string, string>
+    recovery?: Record<string, string>
+  }
+  timeline_status?: {
+    impact_observed?: boolean
+    impact_pending?: boolean
+    recovery_observed?: boolean
+    waiting_for_step?: string
+  }
+  validation?: {
+    configured?: boolean
+    expected?: {
+      app_state?: string
+      not_anr?: boolean
+      not_crash?: boolean
+      running?: boolean
+      should_recover?: boolean
+    }
+    passed?: boolean
+    reasons?: string[]
+  }
+  experiment?: {
+    id?: string
+    state?: "running" | "completed" | "failed"
+    phase?: "baseline" | "injecting" | "recovering" | "completed"
+    fault_type?: string
     current_intensity?: number
+    current_state?: string
+    observation_type?: string
+    target_type?: string
+    package?: string
+    created_at?: string
+    updated_at?: string
   }
 }
 
 export interface AndroidMetricsResponse {
-  app_recovered?: boolean
-  [key: string]: unknown
+  blast_radius_percent?: number
+  cascade_depth?: number
+  crash_classification?: {
+    lifecycle_bug?: number
+    network_bug?: number
+    ui_bug?: number
+    unknown?: number
+  }
+  health?: {
+    crash_reason?: string
+    failure_type?: string
+    severity?: string
+    status?: string
+    thread?: string
+  }
+  impact?: {
+    app_availability_percent?: number
+    blast_radius_percent?: number
+    cascade_depth?: number
+    disruption_events?: number
+  }
+  recovery?: {
+    auto_recovered?: boolean
+    manual_intervention_required?: boolean
+    recovered?: boolean
+    recovery_time_ms?: number
+    running?: boolean
+    stable_recovered?: boolean
+  }
+  replay_hints?: Array<{
+    at_ms?: number
+    at_time?: string
+    fault?: string
+    step?: string
+  }>
+  resilience_threshold?: {
+    breaking_intensity?: number
+    intensity_steps?: number[]
+    max_stable_intensity?: number
+  }
+  scenario?: string
+  stability?: {
+    anr_detected?: boolean
+    background_samples?: number
+    crash_rate_percent?: number
+    unexpected_restarts?: number
+    uptime_percent?: number
+    warning_signals?: number
+  }
+  state_transitions?: unknown[]
+  summary?: {
+    reason?: string
+    result?: string
+    suggestion?: string
+  }
+  target_type?: string
+  timeline?: {
+    fault_start?: string
+    first_impact?: Record<string, string>
+    recovery?: Record<string, string>
+  }
+  validation?: {
+    configured?: boolean
+    expected?: {
+      app_state?: string
+      not_anr?: boolean
+      not_crash?: boolean
+      running?: boolean
+      should_recover?: boolean
+    }
+    passed?: boolean
+    reasons?: string[]
+  }
 }
 
 export interface CreateExperimentPayload {
@@ -248,6 +389,9 @@ export interface SessionRole {
   role: "viewer" | "engineer" | "admin"
   keyId: string
 }
+
+const EXPERIMENT_START_TIMEOUT_MS = 45_000
+const ANDROID_EXPERIMENT_START_TIMEOUT_MS = 180_000
 
 export interface ExperimentHistoryItem {
   experiment: {
@@ -369,6 +513,7 @@ export async function startFrontendExperiment(payload: FrontendStartPayload): Pr
   return requestClient<FrontendExperimentResponse>(exactUrl("/experiments/frontend/start"), {
     method: "POST",
     body: JSON.stringify(payload),
+    timeoutMs: EXPERIMENT_START_TIMEOUT_MS,
   })
 }
 
@@ -394,6 +539,7 @@ export async function startBackendExperiment(payload: BackendStartPayload): Prom
   return requestClient<BackendExperimentResponse>(exactUrl("/experiments/backend/start"), {
     method: "POST",
     body: JSON.stringify(payload),
+    timeoutMs: EXPERIMENT_START_TIMEOUT_MS,
   })
 }
 
@@ -427,6 +573,7 @@ export async function startAndroidExperiment(payload: AndroidStartPayload): Prom
   return requestClient<AndroidExperimentResponse>(exactUrl("/experiments/android/start"), {
     method: "POST",
     body: JSON.stringify(payload),
+    timeoutMs: ANDROID_EXPERIMENT_START_TIMEOUT_MS,
   })
 }
 
@@ -549,12 +696,14 @@ export async function getLogs(filters?: {
   endpoint?: string
   status?: string
   timeRange?: string
+  experimentId?: string
 }): Promise<LogEntry[]> {
   const params = new URLSearchParams()
   if (filters?.endpoint) params.set("endpoint", filters.endpoint)
   if (filters?.status) params.set("status", filters.status)
   if (filters?.timeRange) params.set("timeRange", filters.timeRange)
-  
+  if (filters?.experimentId) params.set("id", filters.experimentId)
+
   return requestClient<LogEntry[]>(buildApiUrl(`/logs?${params.toString()}`), {
     dedupeKey: `logs:${params.toString()}`,
   })

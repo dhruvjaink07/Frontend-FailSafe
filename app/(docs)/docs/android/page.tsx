@@ -91,6 +91,15 @@ file: <binary APK file> OR apk: <binary APK file>`}</CodeBlock>
           <CardHeader><CardTitle className="text-lg">Verified Polling Routes</CardTitle></CardHeader>
           <CardContent className="space-y-4 text-sm text-muted-foreground">
             <CodeBlock>{`GET http://localhost:8000/experiments/android/status?id={experiment_id}`}</CodeBlock>
+            <CodeBlock>{`{
+  "experiment": {
+    "id": "exp-android-uuid",
+    "state": "running",
+    "phase": "injecting",
+    "fault_type": "kill_app",
+    "current_intensity": 45
+  }
+}`}</CodeBlock>
             <CodeBlock>{`GET http://localhost:8000/experiments/android/metrics?id={experiment_id}`}</CodeBlock>
             <CodeBlock>{`POST http://localhost:8000/experiments/android/stop?id={experiment_id}`}</CodeBlock>
           </CardContent>

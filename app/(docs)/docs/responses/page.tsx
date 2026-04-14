@@ -178,6 +178,15 @@ export default function ResponsesPage() {
   "fault_type": "kill_app",
   "package": "com.example.code"
 }`}</CodeBlock>
+            <CodeBlock>{`{
+  "experiment": {
+    "id": "exp-android-uuid",
+    "state": "running",
+    "phase": "injecting",
+    "fault_type": "kill_app",
+    "current_intensity": 45
+  }
+}`}</CodeBlock>
           </CardContent>
         </Card>
       </section>
