@@ -69,13 +69,11 @@ function MetricsPageContent() {
         if (data.length === 0) {
           const history = await getExperimentHistory({ limit: 50, offset: 0 })
           const options = history.items
+            .filter((item) => item.experiment.target_type === "backend")
             .map((item) => item.experiment.id)
             .filter((id): id is string => Boolean(id && id.trim()))
             .filter((id, index, all) => all.indexOf(id) === index)
-            .map((id) => ({
-              id,
-              name: `History ${id.slice(0, 8)}...`,
-            }))
+            .map((id) => ({ id, name: id }))
           setHistoryOptions(options)
           if (!selectedExperiment && options.length > 0) {
             const next = options[0].id
@@ -94,7 +92,8 @@ function MetricsPageContent() {
     const byId = new Map<string, { id: string; name: string }>()
     for (const experiment of experiments) {
       if (!experiment.id?.trim()) continue
-      byId.set(experiment.id, { id: experiment.id, name: experiment.name })
+      if (experiment.platform !== "backend") continue
+      byId.set(experiment.id, { id: experiment.id, name: experiment.id })
     }
     for (const option of historyOptions) {
       if (!option.id?.trim()) continue
@@ -105,7 +104,7 @@ function MetricsPageContent() {
     if (selectedExperiment && !byId.has(selectedExperiment)) {
       byId.set(selectedExperiment, {
         id: selectedExperiment,
-        name: `Experiment ${selectedExperiment.slice(0, 8)}...`,
+        name: selectedExperiment,
       })
     }
     return Array.from(byId.values())
@@ -192,7 +191,7 @@ function MetricsPageContent() {
           <Card>
             <CardContent className="pt-6">
               <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)_auto] md:items-center">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-center">
                   <div className="space-y-1">
                     <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Experiment</span>
                     <Select
@@ -209,34 +208,13 @@ function MetricsPageContent() {
                           <SelectItem value="none" disabled>No experiments</SelectItem>
                         ) : (
                           experimentOptions.map((experiment) => (
-                            <SelectItem key={experiment.id} value={experiment.id}>{experiment.name}</SelectItem>
+                            <SelectItem key={experiment.id} value={experiment.id}>{experiment.id}</SelectItem>
                           ))
                         )}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Manual ID</span>
-                    <Input
-                      className="w-full"
-                      placeholder="Paste experiment ID"
-                      value={experimentInput}
-                      onChange={(event) => setExperimentInput(event.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        const next = experimentInput.trim()
-                        if (!next) return
-                        setSelectedExperiment(next)
-                        router.replace(`/metrics?id=${next}`)
-                      }}
-                    >
-                      Load
-                    </Button>
-                  </div>
+                  
                 </div>
                 <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                   <DataStateIndicator state={connectionState === "active" || connectionState === "paused" ? "ready" : connectionState} />

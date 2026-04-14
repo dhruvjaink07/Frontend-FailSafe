@@ -126,7 +126,12 @@ export async function requestClient<T>(url: string, options: RequestOptions = {}
         try {
           payload = await res.json()
         } catch {
-          payload = { message: `Request failed with status ${res.status}` }
+          try {
+            const text = await res.text()
+            payload = { message: text || `Request failed with status ${res.status}` }
+          } catch {
+            payload = { message: `Request failed with status ${res.status}` }
+          }
         }
         throw parseError({ ...(payload as object), status: res.status })
       }
@@ -135,7 +140,17 @@ export async function requestClient<T>(url: string, options: RequestOptions = {}
         return null as T
       }
 
-      return (await res.json()) as T
+      try {
+        return (await res.json()) as T
+      } catch (e) {
+        // If the backend returned non-JSON but status is OK, include the raw text
+        try {
+          const text = await res.text()
+          throw parseError({ message: text || "Backend returned non-JSON response", status: res.status })
+        } catch (e2) {
+          throw parseError(e)
+        }
+      }
     } catch (error) {
       throw parseError(error)
     } finally {

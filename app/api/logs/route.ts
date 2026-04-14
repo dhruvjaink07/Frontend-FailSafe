@@ -17,12 +17,28 @@ export async function GET(request: NextRequest) {
 
     const contentType = response.headers.get("content-type") ?? ""
     if (contentType.includes("application/json")) {
+      // pass through JSON responses
       return NextResponse.json(await response.json(), { status: response.status })
     }
 
     // Handle plain text log streams from backend -> convert to structured LogEntry[]
     if (contentType.includes("text/plain") || contentType.includes("text/")) {
       const text = await response.text()
+
+      // If backend returned non-OK (400/404/etc), provide a synthetic entry describing it
+      if (!response.ok) {
+        const bodySnippet = text ? text.slice(0, 400) : "<no body>"
+        const synthetic = [{
+          id: `backend-status-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          endpoint: 'backend',
+          message: `Backend returned ${response.status}: ${bodySnippet}`,
+          metadata: null,
+        }]
+        return NextResponse.json(synthetic, { status: response.status })
+      }
+
       // Split into lines and map to LogEntry-like objects
       const lines = text.split(/\r?\n/).filter(Boolean)
       const entries = lines.map((line, idx) => {
@@ -48,10 +64,16 @@ export async function GET(request: NextRequest) {
         }
       })
 
-      return NextResponse.json(entries, { status: response.ok ? 200 : response.status })
+      return NextResponse.json(entries, { status: 200 })
     }
 
-    return NextResponse.json([], { status: response.ok ? 200 : 503 })
+    // For other content types, if response not ok surface a synthetic message
+    if (!response.ok) {
+      const txt = await response.text().catch(() => '')
+      return NextResponse.json([{ id: `backend-status-${Date.now()}`, timestamp: new Date().toISOString(), level: 'error', endpoint: 'backend', message: `Backend returned ${response.status}: ${txt.slice(0,400)}`, metadata: null }], { status: response.status })
+    }
+
+    return NextResponse.json([], { status: 200 })
   } catch {
     return NextResponse.json(
       { error: "Failed to fetch logs" },

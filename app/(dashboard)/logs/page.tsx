@@ -46,6 +46,8 @@ function LogsPageContent() {
   const [timeRange, setTimeRange] = useState(searchParams.get("timeRange") ?? "1h")
   const [experimentId, setExperimentId] = useState(searchParams.get("id") ?? "")
   const [query, setQuery] = useState(searchParams.get("q") ?? "")
+  // default to showing noisy logs so developer-visible output appears
+  const [hideNoisy, setHideNoisy] = useState(false)
 
   const updateUrl = useCallback((next: { endpoint?: string; status?: string; timeRange?: string; q?: string }) => {
     const params = new URLSearchParams(searchParams.toString())
@@ -91,7 +93,25 @@ function LogsPageContent() {
 
   useEffect(() => {
     if (!scrollRef.current || !autoScroll) return
-    scrollRef.current.scrollTop = 0
+    const el = scrollRef.current
+
+    // decide whether newest entries are at the top or bottom by comparing timestamps
+    let newestAtTop = true
+    if (logs.length >= 2) {
+      try {
+        const first = new Date(logs[0].timestamp).getTime()
+        const last = new Date(logs[logs.length - 1].timestamp).getTime()
+        newestAtTop = first >= last
+      } catch {
+        newestAtTop = true
+      }
+    }
+
+    // wait for DOM update and then jump to the correct edge
+    requestAnimationFrame(() => {
+      if (newestAtTop) el.scrollTop = 0
+      else el.scrollTop = el.scrollHeight
+    })
   }, [logs, autoScroll])
 
   // fetch list of recent experiments to populate a selector for quick navigation
@@ -99,7 +119,11 @@ function LogsPageContent() {
   useEffect(() => {
     import('@/lib/api').then(({ getExperimentHistory }) => {
       getExperimentHistory({ limit: 20 }).then((resp) => {
-        setExperimentsList(resp.items.map((it) => ({ id: it.experiment.id, target_type: it.experiment.target_type })))
+        setExperimentsList(
+          resp.items
+            .filter((it) => it.experiment.target_type === "backend")
+            .map((it) => ({ id: it.experiment.id, target_type: it.experiment.target_type }))
+        )
       }).catch(() => {})
     })
   }, [])
@@ -108,9 +132,25 @@ function LogsPageContent() {
     return logs.filter((entry) => {
       const textMatch = !query || entry.message.toLowerCase().includes(query.toLowerCase()) || entry.endpoint.toLowerCase().includes(query.toLowerCase())
       const degradedMatch = status !== "degraded" || Boolean(entry.metadata?.degraded)
-      return textMatch && degradedMatch
+      if (!textMatch || !degradedMatch) return false
+
+      if (hideNoisy) {
+        // filter common noisy backend startup messages
+        const noisyPatterns = [
+          /serving flask app/i,
+          /debug mode:?\s*off/i,
+          /werkzeug/i,
+          /starting/i,
+          /running on/i,
+        ]
+        for (const rx of noisyPatterns) {
+          if (rx.test(entry.message) || rx.test(entry.endpoint)) return false
+        }
+      }
+
+      return true
     })
-  }, [logs, query, status])
+  }, [logs, query, status, hideNoisy])
 
   // Collapse consecutive identical log lines into a single display entry with a count
   const collapsed = useMemo(() => {
@@ -219,7 +259,7 @@ function LogsPageContent() {
                       <SelectContent>
                         <SelectItem value="all">All Experiments</SelectItem>
                         {experimentsList.map((exp) => (
-                          <SelectItem key={exp.id} value={exp.id}>{exp.id} ({exp.target_type})</SelectItem>
+                          <SelectItem key={exp.id} value={exp.id}>{exp.id}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -229,6 +269,7 @@ function LogsPageContent() {
                     {streaming ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </Button>
                   <Button variant="outline" size="icon" className="shrink-0" onClick={() => fetchLogs().catch(() => {})}><RefreshCw className="h-4 w-4" /></Button>
+                  <Button variant={hideNoisy ? "default" : "outline"} className="w-full sm:w-auto" onClick={() => setHideNoisy((c) => !c)}>{hideNoisy ? 'Hide noisy' : 'Show noisy'}</Button>
                   <Button variant="outline" className="w-full sm:w-auto" onClick={exportLogs}><Download className="mr-2 h-4 w-4" />Export</Button>
                 </div>
               </div>
