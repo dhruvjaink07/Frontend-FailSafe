@@ -12,7 +12,10 @@ import {
   Settings,
   Shield,
   BookOpen,
+  LogOut,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { clearAuthToken } from "@/lib/security/auth"
 import { cn } from "@/lib/utils"
 
 const navigation = [
@@ -27,6 +30,7 @@ const navigation = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const activeHref =
     navigation
       .filter((item) => pathname === item.href || pathname.startsWith(item.href + "/"))
@@ -70,18 +74,34 @@ export function AppSidebar() {
 
         {/* Footer */}
         <div className="border-t border-sidebar-border p-4">
-          <Link
-            href="/settings"
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              pathname === "/settings"
-                ? "bg-sidebar-accent text-sidebar-primary"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            )}
-          >
-            <Settings className="h-4 w-4" />
-            Settings
-          </Link>
+          <div className="flex flex-col gap-2">
+            <Link
+              href="/settings"
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                pathname === "/settings"
+                  ? "bg-sidebar-accent text-sidebar-primary"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              )}
+            >
+              <Settings className="h-4 w-4" />
+              Settings
+            </Link>
+
+            <button
+              onClick={async () => {
+                try { await fetch("/api/auth/signout", { method: "POST" }) } catch {}
+                try { clearAuthToken() } catch {}
+                router.push("/signin")
+              }}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              )}
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     </aside>

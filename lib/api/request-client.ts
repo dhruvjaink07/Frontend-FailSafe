@@ -108,16 +108,16 @@ export async function requestClient<T>(url: string, options: RequestOptions = {}
 
   controllers.set(key, requestController)
 
-  const task = (async () => {
+      const task = (async () => {
     try {
       const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData
       const res = await fetch(url, {
         ...options,
         signal,
         headers: {
-          ...(isFormData ? {} : { "Content-Type": "application/json" }),
-          "x-api-key": getApiKey() ?? "",
-          ...options.headers,
+              ...(isFormData ? {} : { "Content-Type": "application/json" }),
+              "x-api-key": getApiKey() ?? "",
+              ...options.headers,
         },
       })
 

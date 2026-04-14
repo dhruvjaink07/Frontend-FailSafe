@@ -13,6 +13,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const apiKey = getForwardedApiKey(request)
+    const authorization = request.headers.get("authorization") || request.cookies.get("failsafe_auth")?.value
     const body = await request.json()
     const { name, role, key } = body as { name?: string; role?: string; key?: string }
 
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       cache: "no-store",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
+        ...(authorization ? { Authorization: `Bearer ${authorization}` } : { "x-api-key": apiKey }),
       },
       body: JSON.stringify({
         environment: BACKEND_ENVIRONMENT,
