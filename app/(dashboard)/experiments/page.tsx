@@ -157,6 +157,11 @@ function ExperimentsPageContent() {
                     <SelectItem value="failed">Failed</SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="flex items-center">
+                  <Button variant="outline" className="ml-2" onClick={() => syncFilters({ platform: 'all', phase: 'all', search: '' })}>
+                    Clear Filters
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -183,12 +188,37 @@ function ExperimentsPageContent() {
                   <h3 className="mt-4 text-lg font-medium">No Experiments Found</h3>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {filters.search || filters.platform !== "all" || filters.phase !== "all"
-                      ? "Try adjusting your filters"
-                      : "Create your first experiment to get started"}
+                      ? "No experiments match your filters. Try these quick searches:"
+                      : "Create your first experiment to get started or try a quick example search"}
                   </p>
-                  <Button className="mt-4" asChild>
-                    <Link href="/experiments/create">Create Experiment</Link>
-                  </Button>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    {[
+                      "auth-service",
+                      "latency",
+                      "database",
+                      "login_flow",
+                      "mobile",
+                    ].map((example) => (
+                      <Button
+                        key={example}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => syncFilters({ search: example })}
+                      >
+                        {example}
+                      </Button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-3">
+                    <Button className="mt-2" asChild>
+                      <Link href="/experiments/create">Create Experiment</Link>
+                    </Button>
+                    <Button variant="ghost" className="mt-2" asChild>
+                      <Link href="/docs">Documentation</Link>
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">

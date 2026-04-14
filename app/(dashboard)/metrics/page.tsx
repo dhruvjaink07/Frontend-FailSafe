@@ -12,7 +12,8 @@ import { DataStateIndicator } from "@/components/core/data-state-indicator"
 import { Topbar } from "@/components/topbar"
 import { alignTimeSeries, decimateTimeSeries } from "@/lib/adapters/metrics-adapter"
 import { config } from "@/lib/config/config"
-import { getExperimentHistory, getExperiments, getMetrics } from "@/lib/api"
+import { getExperimentHistory, getExperiments, getMetrics, getFrontendMetricsReport, getBackendMetricsReport, getAndroidMetricsReport, getExperimentHistoryDetail } from "@/lib/api"
+import { normalizeMetricSnapshot } from "@/lib/adapters/data-normalizer"
 import { parseError } from "@/lib/errors/error-handler"
 import { Poller } from "@/lib/polling/polling-manager"
 import type { Experiment } from "@/lib/store"
@@ -41,6 +42,8 @@ function MetricsPageContent() {
   const [historyOptions, setHistoryOptions] = useState<Array<{ id: string; name: string }>>([])
   const [selectedExperiment, setSelectedExperiment] = useState(searchParams.get("id") ?? "")
   const [experimentInput, setExperimentInput] = useState(searchParams.get("id") ?? "")
+  const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null)
+  const [metricsPartial, setMetricsPartial] = useState(false)
   const [metrics, setMetrics] = useState<Awaited<ReturnType<typeof getMetrics>> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<"active" | "paused" | "disconnected" | "stale">("paused")
@@ -52,6 +55,8 @@ function MetricsPageContent() {
       setSelectedExperiment(idFromUrl)
       setExperimentInput(idFromUrl)
     }
+    const platformFromUrl = searchParams.get("platform")
+    if (platformFromUrl) setSelectedPlatform(platformFromUrl)
   }, [searchParams, selectedExperiment])
 
   useEffect(() => {
@@ -69,7 +74,6 @@ function MetricsPageContent() {
         if (data.length === 0) {
           const history = await getExperimentHistory({ limit: 50, offset: 0 })
           const options = history.items
-            .filter((item) => item.experiment.target_type === "backend")
             .map((item) => item.experiment.id)
             .filter((id): id is string => Boolean(id && id.trim()))
             .filter((id, index, all) => all.indexOf(id) === index)
@@ -80,6 +84,15 @@ function MetricsPageContent() {
             setSelectedExperiment(next)
             setExperimentInput(next)
             router.replace(`/metrics?id=${next}`)
+
+            // Attempt autodetection of platform via history detail when experiments list is empty
+            try {
+              const detail = await getExperimentHistoryDetail(next)
+              const inferred = (detail?.experiment?.target_type as string) || null
+              if (inferred) setSelectedPlatform(inferred)
+            } catch (e) {
+              // ignore detail fetch failures
+            }
           }
         } else {
           setHistoryOptions([])
@@ -92,7 +105,6 @@ function MetricsPageContent() {
     const byId = new Map<string, { id: string; name: string }>()
     for (const experiment of experiments) {
       if (!experiment.id?.trim()) continue
-      if (experiment.platform !== "backend") continue
       byId.set(experiment.id, { id: experiment.id, name: experiment.id })
     }
     for (const option of historyOptions) {
@@ -110,6 +122,25 @@ function MetricsPageContent() {
     return Array.from(byId.values())
   }, [experiments, historyOptions, selectedExperiment])
 
+  // Helper: infer platform for a given experiment id (look up experiments list first, then history detail)
+  async function inferPlatformFor(id: string | undefined) {
+    if (!id) return null
+    const found = experiments.find((e) => e.id === id)
+    if (found?.platform) {
+      setSelectedPlatform(found.platform)
+      return found.platform
+    }
+    try {
+      const detail = await getExperimentHistoryDetail(id)
+      const inferred = (detail?.experiment?.target_type as string) || null
+      if (inferred) setSelectedPlatform(inferred)
+      return inferred
+    } catch {
+      setSelectedPlatform(null)
+      return null
+    }
+  }
+
   const fetchMetrics = useCallback(async () => {
     if (!selectedExperiment) return
     try {
@@ -117,15 +148,34 @@ function MetricsPageContent() {
       if (now - lastPaintAt.current < config.CHART_UPDATE_THROTTLE_MS) {
         return
       }
-      const data = await getMetrics(selectedExperiment)
-      setMetrics({ ...data, intensityHistory: decimateTimeSeries(data.intensityHistory) })
+
+      // Prefer platform-specific metrics endpoints when we know the experiment platform.
+      const experimentRecord = experiments.find((e) => e.id === selectedExperiment)
+      let raw: Record<string, unknown> | null = null
+
+      const platform = selectedPlatform ?? experimentRecord?.platform
+      if (platform === "frontend") {
+        raw = await getFrontendMetricsReport(selectedExperiment)
+      } else if (platform === "android") {
+        raw = await getAndroidMetricsReport(selectedExperiment)
+      } else if (platform === "backend") {
+        raw = await getBackendMetricsReport(selectedExperiment)
+      } else {
+        // Fallback to generic proxy which may attempt to detect platform server-side
+        raw = await getMetrics(selectedExperiment) as unknown as Record<string, unknown>
+      }
+
+      const normalized = normalizeMetricSnapshot(raw || {})
+      setMetrics({ ...normalized, intensityHistory: decimateTimeSeries(normalized.intensityHistory) })
+      const isPartial = (normalized.endpoints.length === 0 && normalized.intensityHistory.length === 0)
+      setMetricsPartial(isPartial)
       setError(null)
       lastPaintAt.current = now
     } catch (err) {
       setError(parseError(err).message)
       throw err
     }
-  }, [selectedExperiment])
+  }, [selectedExperiment, experiments])
 
   useEffect(() => {
     if (!selectedExperiment) return
@@ -193,27 +243,35 @@ function MetricsPageContent() {
               <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-center">
                   <div className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Experiment</span>
-                    <Select
-                      value={selectedExperiment}
-                      onValueChange={(value) => {
-                        setSelectedExperiment(value)
-                        setExperimentInput(value)
-                        router.replace(`/metrics?id=${value}`)
-                      }}
-                    >
-                      <SelectTrigger className="w-full"><SelectValue placeholder="Select experiment" /></SelectTrigger>
-                      <SelectContent>
-                        {experimentOptions.length === 0 ? (
-                          <SelectItem value="none" disabled>No experiments</SelectItem>
-                        ) : (
-                          experimentOptions.map((experiment) => (
-                            <SelectItem key={experiment.id} value={experiment.id}>{experiment.id}</SelectItem>
-                          ))
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Experiment</span>
+                        {selectedPlatform && (
+                          <Badge variant="outline" className="capitalize text-xs">
+                            {selectedPlatform}
+                          </Badge>
                         )}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      </div>
+                      <Select
+                        value={selectedExperiment}
+                        onValueChange={async (value) => {
+                          setSelectedExperiment(value)
+                          setExperimentInput(value)
+                          router.replace(`/metrics?id=${value}`)
+                          await inferPlatformFor(value)
+                        }}
+                      >
+                        <SelectTrigger className="w-full"><SelectValue placeholder="Select experiment" /></SelectTrigger>
+                        <SelectContent>
+                          {experimentOptions.length === 0 ? (
+                            <SelectItem value="none" disabled>No experiments</SelectItem>
+                          ) : (
+                            experimentOptions.map((experiment) => (
+                              <SelectItem key={experiment.id} value={experiment.id}>{experiment.id}</SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   
                 </div>
                 <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -222,6 +280,15 @@ function MetricsPageContent() {
                 </div>
               </div>
               {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+              {metricsPartial && (
+                <div className="mt-3">
+                  <Card>
+                    <CardContent>
+                      <p className="text-sm text-warning">Warning: metrics endpoint returned partial or unsupported data for the selected platform. Charts or tables may be incomplete.</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
             </CardContent>
           </Card>
 

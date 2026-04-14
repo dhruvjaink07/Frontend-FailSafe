@@ -22,7 +22,6 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Experiments", href: "/experiments", icon: FlaskConical },
   { name: "History", href: "/experiments/history", icon: History },
-  { name: "Metrics", href: "/metrics", icon: BarChart3 },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
   { name: "Documentation", href: "/docs", icon: BookOpen },

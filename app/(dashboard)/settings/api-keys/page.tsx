@@ -24,6 +24,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogDescription,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Topbar } from "@/components/topbar"
@@ -438,7 +439,7 @@ export default function ApiKeysPage() {
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Delete API Key</AlertDialogTitle>
-                                  <p className="text-sm text-muted-foreground">Are you sure you want to delete "{apiKey.name}"? This action cannot be undone and any applications using this key will stop working.</p>
+                                <AlertDialogDescription>Are you sure you want to delete "{apiKey.name}"? This action cannot be undone and any applications using this key will stop working.</AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>Cancel</AlertDialogCancel>

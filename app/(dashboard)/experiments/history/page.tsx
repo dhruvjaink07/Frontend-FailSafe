@@ -283,16 +283,16 @@ function HistoryPageContent() {
               ) : (
                 <div className="space-y-4">
                   <div className="overflow-hidden rounded-lg border border-border">
-                    <Table>
+                    <Table className="table-fixed">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Experiment</TableHead>
-                          <TableHead>Platform</TableHead>
-                          <TableHead>Fault Type</TableHead>
-                          <TableHead>State / Phase</TableHead>
-                          <TableHead>Created</TableHead>
-                          <TableHead>Last Updated</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                          <TableHead className="w-64">Experiment</TableHead>
+                          <TableHead className="w-28">Platform</TableHead>
+                          <TableHead className="w-36">Fault Type</TableHead>
+                          <TableHead className="w-40">State / Phase</TableHead>
+                          <TableHead className="w-36">Created</TableHead>
+                          <TableHead className="w-36">Last Updated</TableHead>
+                          <TableHead className="w-56 text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -316,26 +316,30 @@ function HistoryPageContent() {
                               </TableCell>
                               <TableCell>{formatDate(item.experiment.created_at)}</TableCell>
                               <TableCell>{formatDate(item.experiment.updated_at)}</TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => toggleDetails(item.experiment.id)}
-                                  >
-                                    <ChevronDown className={`mr-2 h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                                    {isExpanded ? "Hide" : isLoadingDetail ? "Loading..." : "Details"}
+                              <TableCell className="text-right align-middle">
+                                <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                                  <Button variant="ghost" size="sm" asChild className="flex-shrink-0">
+                                    <Link href={`/metrics?id=${item.experiment.id}&platform=${item.experiment.target_type}`}>
+                                      <ChevronDown className={`mr-2 h-4 w-4`} />
+                                      Details
+                                    </Link>
                                   </Button>
-                                  <Button variant="ghost" size="sm" asChild>
+                                  <Button variant="ghost" size="sm" asChild className="flex-shrink-0">
                                     <Link href={`/experiments/${item.experiment.id}/live?platform=${item.experiment.target_type}`}>
                                       View
                                     </Link>
                                   </Button>
-                                  <Button variant="ghost" size="sm" asChild>
-                                    <Link href={`/logs?id=${item.experiment.id}&timeRange=1h`}>
+                                  {item.experiment.target_type === "backend" ? (
+                                    <Button variant="ghost" size="sm" asChild className="flex-shrink-0">
+                                      <Link href={`/logs?id=${item.experiment.id}&timeRange=1h`}>
+                                        Logs
+                                      </Link>
+                                    </Button>
+                                  ) : (
+                                    <Button variant="ghost" size="sm" className="flex-shrink-0 opacity-60 cursor-not-allowed" disabled aria-disabled>
                                       Logs
-                                    </Link>
-                                  </Button>
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -355,100 +359,7 @@ function HistoryPageContent() {
                                           <p><span className="text-muted-foreground">Phase:</span> {detailedItem.experiment.phase}</p>
                                         </CardContent>
                                       </Card>
-
-                                      <Card className="border-border/70 lg:col-span-2">
-                                        <CardHeader className="pb-2">
-                                          <CardTitle className="text-sm">Status Payload</CardTitle>
-                                          <CardDescription>Latest stored payload from the backend, if available.</CardDescription>
-                                        </CardHeader>
-                                        <CardContent>
-                                          {detailedItem.metrics.status_payload ? (
-                                            <pre className="max-h-72 overflow-auto rounded-lg bg-background p-3 text-xs leading-relaxed text-muted-foreground">
-                                              {formatJson(detailedItem.metrics.status_payload)}
-                                            </pre>
-                                          ) : (
-                                            <p className="text-sm text-muted-foreground">No status payload stored for this experiment.</p>
-                                          )}
-                                        </CardContent>
-                                      </Card>
                                     </div>
-
-                                    <Card className="border-border/70">
-                                      <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm">Aggregated Endpoint Metrics</CardTitle>
-                                        <CardDescription>
-                                          Endpoint-level p50/p95/p99/avg/error_rate/degraded values.
-                                        </CardDescription>
-                                      </CardHeader>
-                                      <CardContent className="overflow-x-auto p-0">
-                                        {detailedItem.metrics.aggregated.length === 0 ? (
-                                          <p className="p-4 text-sm text-muted-foreground">No aggregated rows returned.</p>
-                                        ) : (
-                                          <Table>
-                                            <TableHeader>
-                                              <TableRow>
-                                                <TableHead>Endpoint</TableHead>
-                                                <TableHead className="text-right">Requests</TableHead>
-                                                <TableHead className="text-right">P50</TableHead>
-                                                <TableHead className="text-right">P95</TableHead>
-                                                <TableHead className="text-right">P99</TableHead>
-                                                <TableHead className="text-right">Avg</TableHead>
-                                                <TableHead className="text-right">Error Rate</TableHead>
-                                                <TableHead className="text-right">Degraded</TableHead>
-                                              </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                              {detailedItem.metrics.aggregated
-                                                .slice()
-                                                .sort((a, b) => Number(b.degraded) - Number(a.degraded) || b.error_rate - a.error_rate || b.p95_ms - a.p95_ms)
-                                                .map((row) => (
-                                                  <TableRow key={row.endpoint}>
-                                                    <TableCell className="font-mono text-xs">{row.endpoint}</TableCell>
-                                                    <TableCell className="text-right">{row.requests_total}</TableCell>
-                                                    <TableCell className="text-right">{row.p50_ms}</TableCell>
-                                                    <TableCell className="text-right">{row.p95_ms}</TableCell>
-                                                    <TableCell className="text-right">{row.p99_ms}</TableCell>
-                                                    <TableCell className="text-right">{row.avg_ms}</TableCell>
-                                                    <TableCell className="text-right">{row.error_rate}</TableCell>
-                                                    <TableCell className="text-right">
-                                                      <Badge variant={row.degraded ? "destructive" : "secondary"}>
-                                                        {row.degraded ? "Yes" : "No"}
-                                                      </Badge>
-                                                    </TableCell>
-                                                  </TableRow>
-                                                ))}
-                                            </TableBody>
-                                          </Table>
-                                        )}
-                                      </CardContent>
-                                    </Card>
-
-                                    <Card className="border-border/70">
-                                      <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm">Raw Samples</CardTitle>
-                                        <CardDescription>
-                                          Raw events captured for the experiment.
-                                        </CardDescription>
-                                      </CardHeader>
-                                      <CardContent>
-                                        {detailedItem.metrics.raw.length === 0 ? (
-                                          <p className="text-sm text-muted-foreground">No raw samples stored.</p>
-                                        ) : (
-                                          <>
-                                            <p className="mb-3 text-sm text-muted-foreground">
-                                              Showing {Math.min(3, detailedItem.metrics.raw.length)} of {detailedItem.metrics.raw.length} raw records.
-                                            </p>
-                                            <div className="space-y-3">
-                                              {detailedItem.metrics.raw.slice(0, 3).map((sample, index) => (
-                                                <pre key={index} className="max-h-56 overflow-auto rounded-lg bg-background p-3 text-xs leading-relaxed text-muted-foreground">
-                                                  {formatJson(sample)}
-                                                </pre>
-                                              ))}
-                                            </div>
-                                          </>
-                                        )}
-                                      </CardContent>
-                                    </Card>
                                   </div>
                                 </TableCell>
                               </TableRow>
