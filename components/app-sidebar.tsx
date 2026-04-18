@@ -13,6 +13,7 @@ import {
   Shield,
   BookOpen,
   LogOut,
+  Brain,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { clearAuthToken } from "@/lib/security/auth"
@@ -24,6 +25,7 @@ const navigation = [
   { name: "History", href: "/experiments/history", icon: History },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
+  { name: "ML Insights", href: "/ml-insights", icon: Brain },
   { name: "Documentation", href: "/docs", icon: BookOpen },
 ]
 

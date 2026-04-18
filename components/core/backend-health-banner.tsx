@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 const HEALTH_URL = "/api/health"
-const DISPLAY_HEALTH_URL = "http://localhost:8000/health"
+const DISPLAY_HEALTH_URL = "Go Orchestrator"
 
 export function BackendHealthBanner() {
   const [healthy, setHealthy] = useState<boolean | null>(null)
@@ -18,7 +18,7 @@ export function BackendHealthBanner() {
       setChecking(true)
       try {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5000)
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
         const response = await fetch(HEALTH_URL, {
           signal: controller.signal,
           method: "GET",
@@ -29,7 +29,7 @@ export function BackendHealthBanner() {
         if (!cancelled) {
           setHealthy(Boolean(response.ok && payload.healthy))
         }
-      } catch (error) {
+      } catch (error: any) {
         if (!cancelled) {
           console.error("Health check failed:", error)
           setHealthy(false)

@@ -6,7 +6,7 @@ const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL ?? "http://localhost:8000"
 export async function GET(request: NextRequest) {
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+    const timeout = setTimeout(() => controller.abort(), 30000)
 
     const response = await fetch(`${BACKEND_BASE_URL}/health`, {
       method: "GET",

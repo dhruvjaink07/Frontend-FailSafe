@@ -12,6 +12,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  Brain,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -23,6 +24,7 @@ const navigation = [
   { name: "History", href: "/experiments/history", icon: History },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
+  { name: "ML Insights", href: "/ml-insights", icon: Brain },
   { name: "Settings", href: "/settings", icon: Settings },
 ]
 
