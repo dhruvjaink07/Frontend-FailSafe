@@ -30,6 +30,7 @@ import type { ExperimentHistoryItem } from "@/lib/api"
 import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, FlaskConical, History, ListChecks } from "lucide-react"
 
 const DEFAULT_LIMIT = 10
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
 function asSummaryLabel(item: ExperimentHistoryItem): { label: string; tone: "default" | "secondary" | "destructive" | "outline" } {
   if (!item.summary) return { label: "No summary", tone: "outline" }
@@ -74,8 +75,14 @@ function HistoryPageContent() {
   const searchParams = useSearchParams()
   const [items, setItems] = useState<ExperimentHistoryItem[]>([])
   const [count, setCount] = useState(0)
-  const [limit, setLimit] = useState(DEFAULT_LIMIT)
-  const [offset, setOffset] = useState(0)
+  const [limit, setLimit] = useState(() => {
+    const nextLimit = Number(searchParams.get("limit") ?? DEFAULT_LIMIT)
+    return Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT
+  })
+  const [offset, setOffset] = useState(() => {
+    const nextOffset = Number(searchParams.get("offset") ?? 0)
+    return Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -108,18 +115,18 @@ function HistoryPageContent() {
   useEffect(() => {
     const nextLimit = Number(searchParams.get("limit") ?? DEFAULT_LIMIT)
     const nextOffset = Number(searchParams.get("offset") ?? 0)
-    setLimit(Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT)
-    setOffset(Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0)
-  }, [searchParams])
+    const effectiveLimit = Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT
+    const effectiveOffset = Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0
 
-  useEffect(() => {
     setLoading(true)
-    getExperimentHistory({ limit, offset })
+    getExperimentHistory({ limit: effectiveLimit, offset: effectiveOffset })
       .then((response) => {
         console.log("📋 History response:", response)
         setItems(response.items)
         setCount(response.count)
-        setLimit(response.limit)
+        // Keep component state aligned with the effective URL values and
+        // backend-provided offset.
+        setLimit(effectiveLimit)
         setOffset(response.offset)
         setError(null)
       })
@@ -128,10 +135,11 @@ function HistoryPageContent() {
         setError(parseError(err).message)
       })
       .finally(() => setLoading(false))
-  }, [limit, offset])
+  }, [searchParams.toString()])
 
   const canPrev = offset > 0
-  const canNext = offset + limit < count
+  // Use the number of items actually returned to decide if there's a next page.
+  const canNext = offset + items.length < count
 
   const pageStart = count === 0 ? 0 : offset + 1
   const pageEnd = Math.min(offset + items.length, count)
@@ -250,6 +258,29 @@ function HistoryPageContent() {
                 >
                   Clear Filters
                 </Button>
+
+                <div className="ml-auto sm:ml-0">
+                  <label className="sr-only">Page size</label>
+                  <Select value={String(limit)} onValueChange={(v) => {
+                    const newLimit = Number(v)
+                    if (!Number.isFinite(newLimit) || newLimit <= 0) return
+                    setLimit(newLimit)
+                    const params = new URLSearchParams()
+                    params.set("limit", String(newLimit))
+                    params.set("offset", String(0))
+                    router.replace(`/experiments/history?${params.toString()}`)
+                    router.refresh()
+                  }}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="Per page" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {loading ? (
@@ -303,7 +334,9 @@ function HistoryPageContent() {
                           return (
                               <Fragment key={item.experiment.id}>
                               <TableRow>
-                              <TableCell className="font-mono text-xs sm:text-sm">{item.experiment.id}</TableCell>
+                              <TableCell className="font-mono text-xs sm:text-sm">
+                                <div className="max-w-[16rem] truncate">{item.experiment.id}</div>
+                              </TableCell>
                               <TableCell>
                                 <Badge variant="outline" className="capitalize">{item.experiment.target_type}</Badge>
                               </TableCell>

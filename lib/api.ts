@@ -610,6 +610,8 @@ export async function getExperimentHistory(params?: { limit?: number; offset?: n
   return requestClient<ExperimentHistoryResponse>(buildApiUrl(`/experiments/history${query ? `?${query}` : ""}`), {
     dedupeKey: `experiments:history:${query || "default"}`,
     cache: "no-store",
+    // History queries can take longer on large datasets; give more time.
+    timeoutMs: 60_000,
   })
 }
 
@@ -617,6 +619,8 @@ export async function getExperimentHistoryDetail(id: string): Promise<Experiment
   return requestClient<ExperimentHistoryItem>(buildApiUrl(`/experiments/history/detail?id=${encodeURIComponent(id)}`), {
     dedupeKey: `experiments:history:detail:${id}`,
     cache: "no-store",
+    // Detail endpoints may also be heavy; increase timeout.
+    timeoutMs: 60_000,
   })
 }
 
