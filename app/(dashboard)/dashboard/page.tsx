@@ -8,10 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { Topbar } from "@/components/topbar"
 import { StatusIndicator } from "@/components/status-indicator"
 import { ConnectionStatusCard } from "@/components/core/connection-status-card"
-import { 
-  FlaskConical, 
-  Activity, 
-  AlertTriangle, 
+import {
+  FlaskConical,
+  Activity,
+  AlertTriangle,
   TrendingUp,
   ArrowRight,
   Zap,
@@ -97,12 +97,12 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Topbar 
-        title="Dashboard" 
+      <Topbar
+        title="Dashboard"
         description="System overview and active experiments"
         action={{ label: "New Experiment", href: "/experiments/create" }}
       />
-      
+
       <div className="flex-1 px-4 py-4 sm:px-6 sm:py-6">
         <div className="mx-auto max-w-7xl space-y-6">
           <ConnectionStatusCard />
@@ -149,7 +149,7 @@ export default function DashboardPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -166,7 +166,7 @@ export default function DashboardPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -183,7 +183,7 @@ export default function DashboardPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -192,8 +192,8 @@ export default function DashboardPage() {
                 <AlertTriangle className="h-4 w-4 text-destructive" />
               </CardHeader>
               <CardContent>
-                <Badge 
-                  variant="outline" 
+                <Badge
+                  variant="outline"
                   className={getSeverityColor(systemMetrics?.severity || (metricsUnavailable ? "unknown" : "low"))}
                 >
                   {metricsLoading ? "..." : systemMetrics?.severity?.toUpperCase() ?? "UNAVAILABLE"}
@@ -215,7 +215,7 @@ export default function DashboardPage() {
                     Currently running fault injection tests
                   </CardDescription>
                 </div>
-                  <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" asChild>
                   <Link href="/experiments">
                     View All
                     <ArrowRight className="ml-2 h-4 w-4" />
@@ -295,7 +295,7 @@ export default function DashboardPage() {
                 </CardHeader>
               </Link>
             </Card>
-            
+
             <Card className="cursor-pointer transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-info/30">
               <Link href="/metrics">
                 <CardHeader>
@@ -309,7 +309,7 @@ export default function DashboardPage() {
                 </CardHeader>
               </Link>
             </Card>
-            
+
             <Card className="cursor-pointer transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-warning/30">
               <Link href="/environment">
                 <CardHeader>

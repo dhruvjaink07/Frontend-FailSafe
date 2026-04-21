@@ -12,11 +12,11 @@ const nextConfig = {
   },
   ...(isGithubPages
     ? {
-        output: "export",
-        basePath: pagesBasePath,
-        assetPrefix: `${pagesBasePath}/`,
-        trailingSlash: true,
-      }
+      output: "export",
+      basePath: pagesBasePath,
+      assetPrefix: `${pagesBasePath}/`,
+      trailingSlash: true,
+    }
     : {}),
 }
 
