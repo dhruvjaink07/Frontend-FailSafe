@@ -57,6 +57,14 @@ function ExperimentsPageContent() {
       .finally(() => setLoading(false))
   }, [])
 
+  // If there are no experiments at all (and no active filters), redirect
+  // directly to the Create page so users can start quickly.
+  useEffect(() => {
+    if (!loading && experiments.length === 0 && filters.platform === 'all' && filters.phase === 'all' && !filters.search) {
+      router.replace('/experiments/create')
+    }
+  }, [loading, experiments.length, filters, router])
+
   useEffect(() => {
     const platform = searchParams.get("platform") as Platform | "all" | null
     const phase = searchParams.get("phase") as ExperimentPhase | "all" | null

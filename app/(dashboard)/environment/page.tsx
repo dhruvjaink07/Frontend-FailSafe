@@ -30,6 +30,7 @@ export default function EnvironmentPage() {
   const containers = useAppStore((state) => state.backendContainers as Container[])
   const backendContainersStatus = useAppStore((state) => state.backendContainersStatus)
   const backendContainersError = useAppStore((state) => state.backendContainersError)
+  const backendContainersUnavailable = useAppStore((state) => state.backendContainersUnavailable)
   const loadBackendContainers = useAppStore((state) => state.loadBackendContainers)
 
   useEffect(() => {
@@ -80,6 +81,90 @@ export default function EnvironmentPage() {
     }
   }
 
+  // Start container and stream backend response line-by-line to UI
+  const [streamingLines, setStreamingLines] = useState<Record<string, string[]>>({})
+  const [streaming, setStreaming] = useState<Record<string, boolean>>({})
+  const controllersRef = /*#__PURE__*/ useState(() => new Map<string, AbortController>())[0]
+
+  async function handleStartStream(name: string) {
+    if (actionLoading[name]) return
+
+    setActionLoading((prev) => ({ ...prev, [name]: "starting" }))
+    setStreaming((s) => ({ ...s, [name]: true }))
+    setStreamingLines((s) => ({ ...s, [name]: [] }))
+    const controller = new AbortController()
+    controllersRef.set(name, controller)
+
+    try {
+      const res = await fetch(`/api/containers/${encodeURIComponent(name)}/start`, {
+        method: "POST",
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        setStreamingLines((s) => ({ ...s, [name]: [...(s[name] || []), `ERROR: ${res.status} ${text}`] }))
+        throw new Error(`Start request failed: ${res.status}`)
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) {
+        // No stream available; read as text
+        const text = await res.text()
+        setStreamingLines((s) => ({ ...s, [name]: [...(s[name] || []), text] }))
+      } else {
+        const decoder = new TextDecoder()
+        let buffer = ""
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split(/\r?\n/)
+          buffer = parts.pop() || ""
+          if (parts.length) {
+            setStreamingLines((s) => ({ ...s, [name]: [...(s[name] || []), ...parts] }))
+          }
+        }
+        if (buffer) {
+          setStreamingLines((s) => ({ ...s, [name]: [...(s[name] || []), buffer] }))
+        }
+      }
+
+      // final refresh of containers state
+      await loadBackendContainers({ force: true })
+      toast.success(`${name} started`)
+    } catch (err) {
+      console.error("Stream start error", err)
+      toast.error(`Failed to start ${name}`)
+    } finally {
+      controllersRef.delete(name)
+      setStreaming((s) => {
+        const next = { ...s }
+        delete next[name]
+        return next
+      })
+      setActionLoading((prev) => {
+        const next = { ...prev }
+        delete next[name]
+        return next
+      })
+    }
+  }
+
+  function cancelStream(name: string) {
+    const ctrl = controllersRef.get(name)
+    if (ctrl) {
+      ctrl.abort()
+      controllersRef.delete(name)
+      setStreaming((s) => {
+        const next = { ...s }
+        delete next[name]
+        return next
+      })
+      setStreamingLines((s) => ({ ...s, [name]: [...(s[name] || []), "<stream aborted>"] }))
+    }
+  }
+
   async function handleStop(name: string) {
     if (actionLoading[name]) return
 
@@ -125,18 +210,29 @@ export default function EnvironmentPage() {
                   </CardTitle>
                   <CardDescription>Container runtime status</CardDescription>
                 </div>
-                <Badge variant="outline" className="bg-success/10 text-success border-success/20">
-                  <CheckCircle className="mr-1 h-3 w-3" />
-                  Connected
-                </Badge>
+                {backendContainersUnavailable ? (
+                  <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20">
+                    <span className="mr-1 h-3 w-3 inline-block" />
+                    Disconnected
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-success/10 text-success border-success/20">
+                    <CheckCircle className="mr-1 h-3 w-3" />
+                    Connected
+                  </Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent>
               <div className="mb-4 flex justify-end">
-                <Button variant="outline" size="sm" onClick={handleStartEngine} disabled={engineLoading}>
-                  {engineLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  Start Docker Engine
-                </Button>
+                {!backendContainersUnavailable ? (
+                  <div className="text-sm text-muted-foreground">Engine running</div>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={handleStartEngine} disabled={engineLoading}>
+                    {engineLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                    Start Docker Engine
+                  </Button>
+                )}
               </div>
               {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
               <div className="grid gap-4 sm:grid-cols-3">
@@ -246,21 +342,45 @@ export default function EnvironmentPage() {
                             Stop
                           </Button>
                         ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStart(container.name)}
-                            disabled={!!actionLoading[container.name]}
-                          >
-                            {actionLoading[container.name] ? (
-                              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Play className="mr-2 h-4 w-4" />
-                            )}
-                            Start
-                          </Button>
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleStart(container.name)}
+                              disabled={!!actionLoading[container.name]}
+                            >
+                              {actionLoading[container.name] ? (
+                                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Play className="mr-2 h-4 w-4" />
+                              )}
+                              Start
+                            </Button>
+                            <div className="ml-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleStartStream(container.name)}
+                                disabled={!!actionLoading[container.name] || !!streaming[container.name]}
+                              >
+                                Start & Stream
+                              </Button>
+                            </div>
+                          </>
                         )}
                       </div>
+
+                      {streamingLines[container.name] && streamingLines[container.name].length > 0 && (
+                        <div className="mt-2 rounded border border-border bg-muted p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="text-sm font-medium">Live Start Output</div>
+                            {streaming[container.name] ? (
+                              <Button size="sm" variant="ghost" onClick={() => cancelStream(container.name)}>Abort</Button>
+                            ) : null}
+                          </div>
+                          <pre className="max-h-40 overflow-auto text-xs font-mono">{streamingLines[container.name].join("\n")}</pre>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -272,3 +392,4 @@ export default function EnvironmentPage() {
     </div>
   )
 }
+ 
