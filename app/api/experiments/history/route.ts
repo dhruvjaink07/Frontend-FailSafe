@@ -103,11 +103,31 @@ function normalizeHistoryPayload(payload: unknown, request: NextRequest): Histor
   const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {}
   const rawItems = Array.isArray(record.items) ? (record.items as Array<Record<string, unknown>>) : []
   const items = toHistoryItems(rawItems)
-  const count = typeof record.count === "number" ? record.count : items.length
+  // Backend may already return paginated results. Prefer an explicit
+  // `total_count` (total records across pages) or a numeric `count` if
+  // provided by the backend. If the backend includes pagination hints
+  // such as `limit`, `offset`, or `total_count`, treat the returned
+  // `items` as already sliced and don't re-slice here. Otherwise fall
+  // back to slicing the entire items array according to the requested
+  // `limit`/`offset`.
+  const backendLimit = typeof record.limit === "number" ? (record.limit as number) : undefined
+  const backendOffset = typeof record.offset === "number" ? (record.offset as number) : undefined
+  const totalCount = typeof (record as any).total_count === "number" ? (record as any).total_count : typeof record.count === "number" ? (record.count as number) : items.length
+
+  const backendProvidedPaging = backendLimit !== undefined || backendOffset !== undefined || typeof (record as any).total_count === "number"
+
+  if (backendProvidedPaging) {
+    return {
+      items,
+      count: totalCount,
+      limit: backendLimit ?? limit,
+      offset: backendOffset ?? offset,
+    }
+  }
 
   return {
     items: items.slice(offset, offset + limit),
-    count,
+    count: totalCount,
     limit,
     offset,
   }

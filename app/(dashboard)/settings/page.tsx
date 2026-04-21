@@ -51,131 +51,67 @@ export default function SettingsPage() {
         <div className="mx-auto max-w-6xl space-y-6">
           <ConnectionStatusCard title="Runtime Connection" />
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-muted-foreground">Surface</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">DevOps</p>
-                <p className="text-xs text-muted-foreground">Built for testers and engineers</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-muted-foreground">Runtime</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">Config-first</p>
-                <p className="text-xs text-muted-foreground">Local state + shareable docs</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-muted-foreground">Alerts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">Slack + Email</p>
-                <p className="text-xs text-muted-foreground">Notification routing</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-muted-foreground">Access</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">API Keys</p>
-                <p className="text-xs text-muted-foreground">Role-based controls</p>
-              </CardContent>
-            </Card>
-          </div>
+          
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Advanced Configuration Surface</CardTitle>
-              <CardDescription>
-                Quick access to the settings areas used most by developers and testers.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
-                {settingsSections.map((section) => (
-                  <Card
-                    key={section.title}
-                    className={section.disabled ? "opacity-60" : "cursor-pointer transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-primary/30"}
-                  >
-                    {section.disabled ? (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Quick Links</CardTitle>
+                <CardDescription>Essential settings only — simplified for reliability.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Link href="/settings/api-keys">
+                    <Card className="cursor-pointer">
                       <CardHeader>
                         <div className="flex items-center justify-between">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                            <section.icon className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                          <Badge variant="outline">Coming Soon</Badge>
-                        </div>
-                        <CardTitle className="mt-4 flex items-center gap-2">{section.title}</CardTitle>
-                        <CardDescription>{section.description}</CardDescription>
-                      </CardHeader>
-                    ) : (
-                      <Link href={section.href}>
-                        <CardHeader>
-                          <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                              <section.icon className="h-5 w-5 text-primary" />
+                          <div className="flex items-center gap-3">
+                            <Key className="h-5 w-5 text-primary" />
+                            <div>
+                              <div className="font-medium">API Keys</div>
+                              <div className="text-xs text-muted-foreground">Manage programmatic access</div>
                             </div>
-                            <ArrowRight className="h-5 w-5 text-muted-foreground" />
                           </div>
-                          <CardTitle className="mt-4 flex items-center gap-2">{section.title}</CardTitle>
-                          <CardDescription>{section.description}</CardDescription>
-                        </CardHeader>
-                      </Link>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                          <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  </Link>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-primary/30">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Webhook className="h-5 w-5 text-primary" />
-                  <CardTitle className="text-lg">Slack Alerts</CardTitle>
+                  <Link href="/settings/notifications">
+                    <Card className="cursor-pointer">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Bell className="h-5 w-5 text-primary" />
+                            <div>
+                              <div className="font-medium">Notifications</div>
+                              <div className="text-xs text-muted-foreground">Slack & Email routing</div>
+                            </div>
+                          </div>
+                          <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  </Link>
+                  
+                  <Link href="/settings/dev-workflow">
+                    <Card className="cursor-pointer">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <TerminalSquare className="h-5 w-5 text-primary" />
+                            <div>
+                              <div className="font-medium">Dev Workflow</div>
+                              <div className="text-xs text-muted-foreground">Local dev tooling & runner</div>
+                            </div>
+                          </div>
+                          <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  </Link>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <p>Route experiment failures, degradations, and recoveries to Slack channels.</p>
-                <Button asChild variant="outline" className="w-full transition-all duration-200 ease-out hover:shadow-md">
-                  <Link href="/settings/notifications">Configure Slack</Link>
-                </Button>
-              </CardContent>
-            </Card>
-            <Card className="transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-info/30">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Mail className="h-5 w-5 text-info" />
-                  <CardTitle className="text-lg">Email Alerts</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <p>Send incident summaries and test results to distribution lists or owners.</p>
-                <Button asChild variant="outline" className="w-full transition-all duration-200 ease-out hover:shadow-md">
-                  <Link href="/settings/notifications">Configure Email</Link>
-                </Button>
-              </CardContent>
-            </Card>
-            <Card className="transition-all duration-300 ease-out hover:shadow-lg hover:-translate-y-1 hover:border-warning/30">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <TerminalSquare className="h-5 w-5 text-warning" />
-                  <CardTitle className="text-lg">Dev Workflow</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <p>Keep experiment configs, alert routing, and access control in sync with local workflows.</p>
-                <Button asChild variant="outline" className="w-full transition-all duration-200 ease-out hover:shadow-md">
-                  <Link href="/settings/api-keys">Manage Access</Link>
-                </Button>
               </CardContent>
             </Card>
           </div>

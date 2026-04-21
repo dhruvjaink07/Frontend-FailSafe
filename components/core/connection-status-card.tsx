@@ -26,6 +26,7 @@ export function ConnectionStatusCard({ title = "Connection Status" }: { title?: 
   const [healthy, setHealthy] = useState<boolean | null>(null)
   const [checking, setChecking] = useState(false)
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null)
+  const [engineAvailable, setEngineAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -49,8 +50,32 @@ export function ConnectionStatusCard({ title = "Connection Status" }: { title?: 
       }
     }
 
+    const checkEngine = async () => {
+      try {
+        const res = await fetch("/api/containers", { cache: "no-store" })
+        if (!cancelled) {
+          if (res.ok) {
+            try {
+              const body = await res.json()
+              setEngineAvailable(Array.isArray(body) && body.length > 0)
+            } catch {
+              setEngineAvailable(false)
+            }
+          } else {
+            setEngineAvailable(false)
+          }
+        }
+      } catch {
+        if (!cancelled) setEngineAvailable(false)
+      }
+    }
+
     checkHealth()
-    const interval = setInterval(checkHealth, 30000)
+    checkEngine()
+    const interval = setInterval(() => {
+      checkHealth()
+      checkEngine()
+    }, 30000)
 
     return () => {
       cancelled = true
@@ -78,6 +103,9 @@ export function ConnectionStatusCard({ title = "Connection Status" }: { title?: 
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>{DISPLAY_HEALTH_URL}</p>
           <p>Last checked {formatCheckedAt(lastCheckedAt)}</p>
+          <p>
+            Runtime: {engineAvailable === null ? "Checking" : engineAvailable ? "Connected" : "Unavailable"}
+          </p>
         </div>
         <Button
           variant="outline"

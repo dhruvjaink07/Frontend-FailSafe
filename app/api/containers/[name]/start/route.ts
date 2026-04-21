@@ -46,7 +46,11 @@ export async function POST(
         return NextResponse.json(await response.json(), { status: response.status })
       }
 
-      return NextResponse.json({ name, status: "running" }, { status: response.status })
+      // If backend returns a non-JSON streaming body (plain text, lines, etc.),
+      // proxy the response body directly so the client can stream it line-by-line.
+      const headers: Record<string, string> = {}
+      response.headers.forEach((v, k) => (headers[k] = v))
+      return new Response(response.body, { status: response.status, headers })
     }
 
     return NextResponse.json({ error: "Container start endpoint not available" }, { status: 503 })
