@@ -4,11 +4,24 @@ import { useEffect, useState } from "react"
 import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-const HEALTH_URL = "/api/health"
-const DISPLAY_HEALTH_URL = "Go Orchestrator"
+const DEFAULT_BACKENDS = "python=http://localhost:5000,go=http://localhost:8000"
+const BACKENDS_CONFIG = process.env.NEXT_PUBLIC_API_BACKENDS || DEFAULT_BACKENDS
+
+type Backend = { name: string; url: string }
+const parseBackends = (cfg: string): Backend[] =>
+  cfg.split(",").map(s => {
+    const [name, url] = s.split("=").map(x => x.trim())
+    return { name: name || url || "unknown", url: url || name }
+  })
+
+const BACKENDS = parseBackends(BACKENDS_CONFIG)
 
 export function BackendHealthBanner() {
-  const [healthy, setHealthy] = useState<boolean | null>(null)
+  const [statuses, setStatuses] = useState<Record<string, boolean | null>>(() => {
+    const init: Record<string, boolean | null> = {}
+    BACKENDS.forEach(b => (init[b.name] = null))
+    return init
+  })
   const [checking, setChecking] = useState(false)
 
   useEffect(() => {
@@ -17,23 +30,41 @@ export function BackendHealthBanner() {
     const checkHealth = async () => {
       setChecking(true)
       try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
-        const response = await fetch(HEALTH_URL, {
-          signal: controller.signal,
-          method: "GET",
-          headers: { "Accept": "text/plain" },
-        })
-        clearTimeout(timeoutId)
-        const payload = (await response.json()) as { healthy?: boolean }
+        const checks = await Promise.all(
+          BACKENDS.map(async b => {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 15000)
+            try {
+              const response = await fetch(`${b.url.replace(/\/$/, "")}/api/health`, {
+                signal: controller.signal,
+                method: "GET",
+              })
+              clearTimeout(timeoutId)
+              let payload: { healthy?: boolean } | null = null
+              try {
+                const text = await response.text()
+                try {
+                  payload = JSON.parse(text) as { healthy?: boolean }
+                } catch {
+                  payload = null
+                }
+              } catch {
+                payload = null
+              }
+              return { name: b.name, healthy: Boolean(response.ok && (payload?.healthy ?? true)) }
+            } catch (err) {
+              clearTimeout(timeoutId)
+              return { name: b.name, healthy: false }
+            }
+          })
+        )
         if (!cancelled) {
-          setHealthy(Boolean(response.ok && payload.healthy))
+          const next: Record<string, boolean | null> = {}
+          checks.forEach(c => (next[c.name] = c.healthy))
+          setStatuses(next)
         }
-      } catch (error: any) {
-        if (!cancelled) {
-          console.error("Health check failed:", error)
-          setHealthy(false)
-        }
+      } catch (error) {
+        if (!cancelled) console.error("Health checks failed:", error)
       } finally {
         if (!cancelled) setChecking(false)
       }
@@ -47,12 +78,16 @@ export function BackendHealthBanner() {
     }
   }, [])
 
-  if (healthy === true) {
+  const healthyNames = Object.entries(statuses)
+    .filter(([, v]) => v === true)
+    .map(([k]) => k)
+
+  if (healthyNames.length > 0) {
     return (
       <div className="flex items-center justify-between gap-3 border-b border-success/30 bg-success/10 px-4 py-2 text-sm text-success">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4" />
-          Backend reachable at {DISPLAY_HEALTH_URL}
+          Backend reachable: {healthyNames.join(", ")}
         </div>
         <Button
           variant="ghost"
@@ -71,7 +106,13 @@ export function BackendHealthBanner() {
     <div className="flex items-center justify-between gap-3 border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm text-warning">
       <div className="flex items-center gap-2">
         <AlertTriangle className="h-4 w-4" />
-        {checking ? "Checking backend health..." : `Backend unavailable at ${DISPLAY_HEALTH_URL}`}
+        {checking ? (
+          "Checking backend health..."
+        ) : (
+          <span>
+            Backend unavailable: {BACKENDS.map(b => `${b.name} (${b.url})`).join(", ")}
+          </span>
+        )}
       </div>
       <Button
         variant="ghost"
@@ -81,8 +122,18 @@ export function BackendHealthBanner() {
           try {
             setChecking(true)
             const response = await fetch(HEALTH_URL)
-            const payload = (await response.json()) as { healthy?: boolean }
-            setHealthy(Boolean(response.ok && payload.healthy))
+            let payload: { healthy?: boolean } | null = null
+            try {
+              const text = await response.text()
+              try {
+                payload = JSON.parse(text) as { healthy?: boolean }
+              } catch {
+                payload = null
+              }
+            } catch {
+              payload = null
+            }
+            setHealthy(Boolean(response.ok && (payload?.healthy ?? true)))
           } catch {
             setHealthy(false)
           } finally {

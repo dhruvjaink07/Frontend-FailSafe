@@ -19,6 +19,7 @@ import type { Container } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { requestClient } from "@/lib/api/request-client"
 import { toast } from "sonner"
+import { parseError } from "@/lib/errors/error-handler"
 
 type ContainerAction = "starting" | "stopping"
 
@@ -69,9 +70,10 @@ export default function EnvironmentPage() {
       await loadBackendContainers({ force: true })
       toast.success(`${name} started`)
     } catch (error) {
-      console.error("Failed to start container:", error)
-      setError("Failed to start container")
-      toast.error(`Failed to start ${name}`)
+      const parsed = parseError(error)
+      console.error("Failed to start container:", parsed)
+      setError(parsed.message)
+      toast.error(`${name}: ${parsed.message}`)
     } finally {
       setActionLoading((prev) => {
         const next = { ...prev }

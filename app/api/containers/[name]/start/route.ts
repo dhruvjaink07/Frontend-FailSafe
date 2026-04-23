@@ -16,41 +16,55 @@ export async function POST(
       "content-type": "application/json",
     }
 
+    // Prefer the body-based start endpoints (many backends expect POST /environment/containers/start)
     const candidates: Array<{ path: string; body?: string }> = [
-      { path: `/environment/containers/${encodeURIComponent(name)}/start` },
       { path: "/environment/containers/start", body: JSON.stringify({ name }) },
-      { path: `/containers/${encodeURIComponent(name)}/start` },
-      { path: "/containers/start", body: JSON.stringify({ name }) },
       { path: "/environment/containers/start", body: JSON.stringify({ name, container: name }) },
+      { path: "/containers/start", body: JSON.stringify({ name }) },
       { path: "/docker/containers/start", body: JSON.stringify({ name }) },
       { path: "/engine/containers/start", body: JSON.stringify({ name }) },
+      { path: `/environment/containers/${encodeURIComponent(name)}/start` },
+      { path: `/containers/${encodeURIComponent(name)}/start` },
     ]
 
     for (const candidate of candidates) {
-      const response = await fetch(`${BACKEND_BASE_URL}${candidate.path}`, {
-        method: "POST",
-        cache: "no-store",
-        headers,
-        body: candidate.body,
-      })
-      const contentType = response.headers.get("content-type") ?? ""
-      if (!response.ok) {
-        if (response.status === 404) continue
+      const target = `${BACKEND_BASE_URL}${candidate.path}`
+      try {
+        const response = await fetch(target, {
+          method: "POST",
+          cache: "no-store",
+          headers,
+          body: candidate.body,
+        })
+        const contentType = response.headers.get("content-type") ?? ""
+
+        // Log each attempt for easier debugging in server logs
+        // eslint-disable-next-line no-console
+        console.debug(`[proxy] POST ${target} -> ${response.status} (${contentType})`)
+
+        if (!response.ok) {
+          if (response.status === 404) continue
+          if (contentType.includes("application/json")) {
+            return NextResponse.json(await response.json(), { status: response.status })
+          }
+          const text = await response.text().catch(() => `Backend responded with status ${response.status}`)
+          return NextResponse.json({ error: text }, { status: response.status })
+        }
+
         if (contentType.includes("application/json")) {
           return NextResponse.json(await response.json(), { status: response.status })
         }
-        return NextResponse.json({ error: `Backend responded with status ${response.status}` }, { status: response.status })
-      }
 
-      if (contentType.includes("application/json")) {
-        return NextResponse.json(await response.json(), { status: response.status })
+        // Proxy non-JSON streaming bodies directly
+        const proxiedHeaders: Record<string, string> = {}
+        response.headers.forEach((v, k) => (proxiedHeaders[k] = v))
+        return new Response(response.body, { status: response.status, headers: proxiedHeaders })
+      } catch (err) {
+        // Log the network error and try the next candidate
+        // eslint-disable-next-line no-console
+        console.error(`[proxy] Error POST ${target}:`, err)
+        continue
       }
-
-      // If backend returns a non-JSON streaming body (plain text, lines, etc.),
-      // proxy the response body directly so the client can stream it line-by-line.
-      const headers: Record<string, string> = {}
-      response.headers.forEach((v, k) => (headers[k] = v))
-      return new Response(response.body, { status: response.status, headers })
     }
 
     return NextResponse.json({ error: "Container start endpoint not available" }, { status: 503 })

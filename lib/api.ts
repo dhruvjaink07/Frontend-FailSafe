@@ -602,7 +602,7 @@ export async function getExperiments(): Promise<Experiment[]> {
   return raw.map((item) => normalizeExperiment(item))
 }
 
-export async function getExperimentHistory(params?: { limit?: number; offset?: number }): Promise<ExperimentHistoryResponse> {
+export async function getExperimentHistory(params?: { limit?: number; offset?: number; signal?: AbortSignal }): Promise<ExperimentHistoryResponse> {
   const search = new URLSearchParams()
   if (typeof params?.limit === "number") search.set("limit", String(params.limit))
   if (typeof params?.offset === "number") search.set("offset", String(params.offset))
@@ -612,6 +612,7 @@ export async function getExperimentHistory(params?: { limit?: number; offset?: n
     cache: "no-store",
     // History queries can take longer on large datasets; give more time.
     timeoutMs: 60_000,
+    signal: params?.signal,
   })
 }
 
@@ -710,6 +711,9 @@ export async function getLogs(filters?: {
 
   return requestClient<LogEntry[]>(buildApiUrl(`/logs?${params.toString()}`), {
     dedupeKey: `logs:${params.toString()}`,
+    // Log queries can be slow when querying large time ranges or backends.
+    // Increase timeout to 60s to allow the backend to assemble results.
+    timeoutMs: 60000,
   })
 }
 

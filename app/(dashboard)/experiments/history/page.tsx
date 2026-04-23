@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, Suspense, useEffect, useMemo, useState } from "react"
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
@@ -25,12 +25,45 @@ import {
 } from "@/components/ui/table"
 import { Topbar } from "@/components/topbar"
 import { getExperimentHistory, getExperimentHistoryDetail } from "@/lib/api"
+import useSWR from "swr"
+import { useAppStore } from "@/lib/store"
 import { parseError } from "@/lib/errors/error-handler"
 import type { ExperimentHistoryItem } from "@/lib/api"
 import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, FlaskConical, History, ListChecks } from "lucide-react"
 
 const DEFAULT_LIMIT = 10
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+// Module-level caches so state survives component unmount/mount (back/forward)
+const HISTORY_CACHE_KEY = "fs:history:cache"
+const HISTORY_DETAIL_CACHE_KEY = "fs:history:detail_cache"
+
+function readSessionCache<T>(key: string): T | null {
+  try {
+    if (typeof sessionStorage === "undefined") return null
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+function writeSessionCache<T>(key: string, value: T) {
+  try {
+    if (typeof sessionStorage === "undefined") return
+    sessionStorage.setItem(key, JSON.stringify(value))
+  } catch {}
+}
+
+const globalHistCache = (globalThis as any).__fs_history_cache || readSessionCache<Record<string, { items: ExperimentHistoryItem[]; count: number; limit: number; offset: number }>>(HISTORY_CACHE_KEY) || {}
+;(globalThis as any).__fs_history_cache = globalHistCache
+
+const globalHistDetailCache = (globalThis as any).__fs_history_detail_cache || readSessionCache<Record<string, ExperimentHistoryItem>>(HISTORY_DETAIL_CACHE_KEY) || {}
+;(globalThis as any).__fs_history_detail_cache = globalHistDetailCache
+
+const historyCache = globalHistCache
+const historyDetailCache = globalHistDetailCache
 
 function asSummaryLabel(item: ExperimentHistoryItem): { label: string; tone: "default" | "secondary" | "destructive" | "outline" } {
   if (!item.summary) return { label: "No summary", tone: "outline" }
@@ -73,24 +106,29 @@ function formatJson(value: unknown): string {
 function HistoryPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  // per-mount controller (stays in ref) but use module-level cache above
+  const fetchControllerRef = useRef<AbortController | null>(null)
+  const { historyState, setHistoryState } = useAppStore()
   const [items, setItems] = useState<ExperimentHistoryItem[]>([])
   const [count, setCount] = useState(0)
   const [limit, setLimit] = useState(() => {
-    const nextLimit = Number(searchParams.get("limit") ?? DEFAULT_LIMIT)
-    return Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT
+    const urlLimit = Number(searchParams.get("limit") ?? NaN)
+    if (Number.isFinite(urlLimit) && urlLimit > 0) return Math.min(urlLimit, 200)
+    return historyState?.limit ?? DEFAULT_LIMIT
   })
   const [offset, setOffset] = useState(() => {
-    const nextOffset = Number(searchParams.get("offset") ?? 0)
-    return Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0
+    const urlOffset = Number(searchParams.get("offset") ?? NaN)
+    if (Number.isFinite(urlOffset) && urlOffset >= 0) return urlOffset
+    return historyState?.offset ?? 0
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detailById, setDetailById] = useState<Record<string, ExperimentHistoryItem>>({})
   const [detailLoadingById, setDetailLoadingById] = useState<Record<string, boolean>>({})
-  const [platformFilter, setPlatformFilter] = useState<string>("all")
-  const [stateFilter, setStateFilter] = useState<string>("all")
-  const [faultTypeFilter, setFaultTypeFilter] = useState<string>("all")
+  const [platformFilter, setPlatformFilter] = useState<string>(() => historyState?.platform ?? "all")
+  const [stateFilter, setStateFilter] = useState<string>(() => historyState?.phase ?? "all")
+  const [faultTypeFilter, setFaultTypeFilter] = useState<string>(() => historyState?.faultType ?? "all")
 
   async function toggleDetails(id: string) {
     if (expandedId === id) {
@@ -98,44 +136,80 @@ function HistoryPageContent() {
       return
     }
 
-    setExpandedId(id)
-    if (detailById[id]) return
+      setExpandedId(id)
+      // Avoid duplicate fetches if already loading or cached
+      if (detailById[id] || detailLoadingById[id]) return
 
-    setDetailLoadingById((prev) => ({ ...prev, [id]: true }))
-    try {
-      const detailed = await getExperimentHistoryDetail(id)
-      setDetailById((prev) => ({ ...prev, [id]: detailed }))
-    } catch {
-      // Keep list item content as fallback when detail endpoint is unavailable.
-    } finally {
-      setDetailLoadingById((prev) => ({ ...prev, [id]: false }))
-    }
+      // If we have a module-level cached detail, use it
+      const cachedDetail = historyDetailCache[id]
+      if (cachedDetail) {
+        setDetailById((prev) => ({ ...prev, [id]: cachedDetail }))
+        return
+      }
+
+      setDetailLoadingById((prev) => ({ ...prev, [id]: true }))
+      try {
+        const detailed = await getExperimentHistoryDetail(id)
+        historyDetailCache[id] = detailed
+        try { writeSessionCache(HISTORY_DETAIL_CACHE_KEY, historyDetailCache) } catch {}
+        setDetailById((prev) => ({ ...prev, [id]: detailed }))
+      } catch {
+        // Keep list item content as fallback when detail endpoint is unavailable.
+      } finally {
+        setDetailLoadingById((prev) => ({ ...prev, [id]: false }))
+      }
   }
 
   useEffect(() => {
+    // Use SWR to fetch & dedupe requests. We still read module cache first
     const nextLimit = Number(searchParams.get("limit") ?? DEFAULT_LIMIT)
     const nextOffset = Number(searchParams.get("offset") ?? 0)
     const effectiveLimit = Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT
     const effectiveOffset = Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0
 
-    setLoading(true)
-    getExperimentHistory({ limit: effectiveLimit, offset: effectiveOffset })
-      .then((response) => {
-        console.log("📋 History response:", response)
-        setItems(response.items)
-        setCount(response.count)
-        // Keep component state aligned with the effective URL values and
-        // backend-provided offset.
-        setLimit(effectiveLimit)
-        setOffset(response.offset)
-        setError(null)
-      })
-      .catch((err) => {
-        console.error("❌ History error:", err)
-        setError(parseError(err).message)
-      })
-      .finally(() => setLoading(false))
+    const cacheKey = `${effectiveLimit}:${effectiveOffset}`
+    const cached = historyCache[cacheKey]
+    if (cached) {
+      setItems(cached.items)
+      setCount(cached.count)
+      setLimit(cached.limit)
+      setOffset(cached.offset)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    // Let SWR drive network requests and update state when ready
+    // (useSWR call below is based on searchParams.toString())
   }, [searchParams.toString()])
+
+  // SWR hook (dedupes in-flight requests)
+  const nextLimit = Number(searchParams.get("limit") ?? DEFAULT_LIMIT)
+  const nextOffset = Number(searchParams.get("offset") ?? 0)
+  const effectiveLimit = Number.isFinite(nextLimit) && nextLimit > 0 ? Math.min(nextLimit, 200) : DEFAULT_LIMIT
+  const effectiveOffset = Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : 0
+  const swrKey = `history:${effectiveLimit}:${effectiveOffset}`
+  const { data: swrData, error: swrError, isLoading: swrLoading } = useSWR(swrKey, () => getExperimentHistory({ limit: effectiveLimit, offset: effectiveOffset }), {
+    revalidateOnFocus: false,
+    dedupingInterval: 5000,
+  })
+
+  useEffect(() => {
+    const cacheKey = `${effectiveLimit}:${effectiveOffset}`
+    if (swrData) {
+      historyCache[cacheKey] = { items: swrData.items, count: swrData.count, limit: swrData.limit, offset: swrData.offset }
+      try { writeSessionCache(HISTORY_CACHE_KEY, historyCache) } catch {}
+      setItems(swrData.items)
+      setCount(swrData.count)
+      setLimit(effectiveLimit)
+      setOffset(swrData.offset)
+      setError(null)
+    }
+    if (swrError) {
+      setError(parseError(swrError).message)
+    }
+    setLoading(Boolean(swrLoading) && !Boolean(historyCache[cacheKey]))
+  }, [swrData, swrError, swrLoading, effectiveLimit, effectiveOffset])
 
   const canPrev = offset > 0
   // Use the number of items actually returned to decide if there's a next page.
@@ -169,8 +243,10 @@ function HistoryPageContent() {
     const params = new URLSearchParams()
     params.set("limit", String(limit))
     params.set("offset", String(Math.max(0, nextOffset)))
+    // Update URL and local state without forcing a full refresh
     router.replace(`/experiments/history?${params.toString()}`)
-    router.refresh()
+    setOffset(Math.max(0, nextOffset))
+    setHistoryState({ offset: Math.max(0, nextOffset) })
   }
 
   const summaryText = useMemo(() => {
@@ -212,7 +288,7 @@ function HistoryPageContent() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                <Select value={platformFilter} onValueChange={setPlatformFilter}>
+                <Select value={platformFilter} onValueChange={(v) => { setPlatformFilter(v); setHistoryState({ platform: v as any }) }}>
                   <SelectTrigger className="w-full sm:w-44">
                     <SelectValue placeholder="Platform" />
                   </SelectTrigger>
@@ -224,7 +300,7 @@ function HistoryPageContent() {
                   </SelectContent>
                 </Select>
 
-                <Select value={stateFilter} onValueChange={setStateFilter}>
+                <Select value={stateFilter} onValueChange={(v) => { setStateFilter(v); setHistoryState({ phase: v as any }) }}>
                   <SelectTrigger className="w-full sm:w-44">
                     <SelectValue placeholder="State" />
                   </SelectTrigger>
@@ -236,7 +312,7 @@ function HistoryPageContent() {
                   </SelectContent>
                 </Select>
 
-                <Select value={faultTypeFilter} onValueChange={setFaultTypeFilter}>
+                <Select value={faultTypeFilter} onValueChange={(v) => { setFaultTypeFilter(v); setHistoryState({ faultType: v }) }}>
                   <SelectTrigger className="w-full sm:w-52">
                     <SelectValue placeholder="Fault Type" />
                   </SelectTrigger>
@@ -254,6 +330,7 @@ function HistoryPageContent() {
                     setPlatformFilter("all")
                     setStateFilter("all")
                     setFaultTypeFilter("all")
+                    setHistoryState({ platform: "all", phase: "all", faultType: "all" })
                   }}
                 >
                   Clear Filters
@@ -265,11 +342,13 @@ function HistoryPageContent() {
                     const newLimit = Number(v)
                     if (!Number.isFinite(newLimit) || newLimit <= 0) return
                     setLimit(newLimit)
+                    setOffset(0)
+                    setHistoryState({ limit: newLimit, offset: 0 })
                     const params = new URLSearchParams()
                     params.set("limit", String(newLimit))
                     params.set("offset", String(0))
+                    // Update URL without forcing refresh; the effect watches searchParams
                     router.replace(`/experiments/history?${params.toString()}`)
-                    router.refresh()
                   }}>
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Per page" />
@@ -362,17 +441,7 @@ function HistoryPageContent() {
                                       View
                                     </Link>
                                   </Button>
-                                  {item.experiment.target_type === "backend" ? (
-                                    <Button variant="ghost" size="sm" asChild className="flex-shrink-0">
-                                      <Link href={`/logs?id=${item.experiment.id}&timeRange=1h`}>
-                                        Logs
-                                      </Link>
-                                    </Button>
-                                  ) : (
-                                    <Button variant="ghost" size="sm" className="flex-shrink-0 opacity-60 cursor-not-allowed" disabled aria-disabled>
-                                      Logs
-                                    </Button>
-                                  )}
+                                  {/* Logs action removed per user request */}
                                 </div>
                               </TableCell>
                             </TableRow>

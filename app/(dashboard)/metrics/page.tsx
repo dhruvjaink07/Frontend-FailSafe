@@ -46,6 +46,7 @@ function MetricsPageContent() {
   const [metricsPartial, setMetricsPartial] = useState(false)
   const [metrics, setMetrics] = useState<Awaited<ReturnType<typeof getMetrics>> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isFetchingMetrics, setIsFetchingMetrics] = useState(false)
   const [connectionState, setConnectionState] = useState<"active" | "paused" | "disconnected" | "stale">("paused")
   const lastPaintAt = useRef(0)
 
@@ -144,14 +145,16 @@ function MetricsPageContent() {
   const fetchMetrics = useCallback(async () => {
     if (!selectedExperiment) return
     try {
+      setIsFetchingMetrics(true)
       const now = Date.now()
       if (now - lastPaintAt.current < config.CHART_UPDATE_THROTTLE_MS) {
+        setIsFetchingMetrics(false)
         return
       }
 
       // Prefer platform-specific metrics endpoints when we know the experiment platform.
       const experimentRecord = experiments.find((e) => e.id === selectedExperiment)
-      let raw: Record<string, unknown> | null = null
+      let raw: unknown = null
 
       const platform = selectedPlatform ?? experimentRecord?.platform
       if (platform === "frontend") {
@@ -165,17 +168,18 @@ function MetricsPageContent() {
         raw = await getMetrics(selectedExperiment) as unknown as Record<string, unknown>
       }
 
-      const normalized = normalizeMetricSnapshot(raw || {})
+      const normalized = normalizeMetricSnapshot((raw || {}) as Record<string, unknown>)
       setMetrics({ ...normalized, intensityHistory: decimateTimeSeries(normalized.intensityHistory) })
       const isPartial = (normalized.endpoints.length === 0 && normalized.intensityHistory.length === 0)
       setMetricsPartial(isPartial)
       setError(null)
       lastPaintAt.current = now
+      setIsFetchingMetrics(false)
     } catch (err) {
       setError(parseError(err).message)
       throw err
     }
-  }, [selectedExperiment, experiments])
+  }, [selectedExperiment, experiments, selectedPlatform])
 
   useEffect(() => {
     if (!selectedExperiment) return
@@ -188,7 +192,7 @@ function MetricsPageContent() {
     })
     poller.start()
     return () => poller.stop()
-  }, [fetchMetrics, selectedExperiment])
+  }, [fetchMetrics, selectedExperiment, selectedPlatform])
 
   const alignedSeries = useMemo(() => {
     if (!metrics?.intensityHistory?.length) return []
@@ -258,6 +262,8 @@ function MetricsPageContent() {
                           setExperimentInput(value)
                           router.replace(`/metrics?id=${value}`)
                           await inferPlatformFor(value)
+                          // Immediately request metrics for the newly selected experiment
+                          fetchMetrics().catch(() => {})
                         }}
                       >
                         <SelectTrigger className="w-full"><SelectValue placeholder="Select experiment" /></SelectTrigger>
@@ -279,7 +285,12 @@ function MetricsPageContent() {
                   <Button variant="outline" className="w-full sm:w-auto" onClick={exportMetrics}><Download className="mr-2 h-4 w-4" />Export</Button>
                 </div>
               </div>
-              {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+              {error && (
+                <div className="mt-3 flex items-center gap-3">
+                  <p className="text-sm text-destructive">{error}</p>
+                  <Button size="sm" variant="ghost" onClick={() => fetchMetrics().catch(() => {})}>Retry</Button>
+                </div>
+              )}
               {metricsPartial && (
                 <div className="mt-3">
                   <Card>
@@ -295,7 +306,11 @@ function MetricsPageContent() {
           {!metrics ? (
             <Card>
               <CardContent className="py-12 text-center">
-                {!selectedExperiment ? (
+                {isFetchingMetrics ? (
+                  <div className="flex items-center justify-center">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  </div>
+                ) : !selectedExperiment ? (
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-sm text-muted-foreground">No experiment selected</p>
                     <p className="text-xs text-muted-foreground">Select an experiment above to view metrics</p>

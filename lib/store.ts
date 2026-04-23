@@ -103,6 +103,15 @@ interface AppState {
   backendContainersError: string | null
   backendContainersUnavailable: boolean
   loadBackendContainers: (options?: { force?: boolean }) => Promise<BackendContainerSummary[]>
+  // History UI state (persisted to sessionStorage)
+  historyState: {
+    limit: number
+    offset: number
+    platform: Platform | "all"
+    phase: ExperimentPhase | "all"
+    faultType: string | "all"
+  }
+  setHistoryState: (partial: Partial<AppState["historyState"]>) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -196,4 +205,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     return backendContainersInFlight
   },
+  historyState: (() => {
+    const HISTORY_KEY = "fs:history:state"
+    let saved: AppState["historyState"] | null = null
+    try {
+      if (typeof window !== "undefined") {
+        const raw = sessionStorage.getItem(HISTORY_KEY)
+        if (raw) saved = JSON.parse(raw)
+      }
+    } catch {}
+
+    return {
+      limit: saved?.limit ?? 10,
+      offset: saved?.offset ?? 0,
+      platform: (saved?.platform as any) ?? "all",
+      phase: (saved?.phase as any) ?? "all",
+      faultType: saved?.faultType ?? "all",
+    }
+  })(),
+  setHistoryState: (partial) =>
+    set((state) => {
+      const HISTORY_KEY = "fs:history:state"
+      const next = { ...state.historyState, ...partial }
+      try {
+        if (typeof window !== "undefined") sessionStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+      } catch {}
+      return { historyState: next }
+    }),
 }))

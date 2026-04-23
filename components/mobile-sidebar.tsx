@@ -19,22 +19,26 @@ import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Experiments", href: "/experiments", icon: FlaskConical },
+  { name: "Insights", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Experiments", href: "/experiments/create", icon: FlaskConical },
   { name: "History", href: "/experiments/history", icon: History },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
-  { name: "ML Insights", href: "/ml-insights", icon: Brain },
+  // ML Insights moved to Dashboard; removed standalone nav entry
   { name: "Settings", href: "/settings", icon: Settings },
 ]
 
 export function MobileSidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const pathname = usePathname()
-  const activeHref =
+  let activeHref =
     navigation
       .filter((item) => pathname === item.href || pathname.startsWith(item.href + "/"))
       .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null
+
+  if (!activeHref && pathname?.startsWith("/experiments")) {
+    activeHref = "/experiments/create"
+  }
 
   return (
     <>

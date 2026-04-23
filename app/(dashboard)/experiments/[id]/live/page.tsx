@@ -25,7 +25,7 @@ import {
 import { alignTimeSeries } from "@/lib/adapters/metrics-adapter"
 import { parseError } from "@/lib/errors/error-handler"
 import { logEvent } from "@/lib/events/event-logger"
-import { Poller } from "@/lib/polling/polling-manager"
+import useSWR from "swr"
 import { formatRelativeTime, toTimestampMs } from "@/lib/time/time-utils"
 import { Download, Gauge, Square } from "lucide-react"
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
@@ -703,15 +703,75 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
       })
   }, [id, searchParams])
 
+  // Try hydrating from the history detail cache to show something instantly
+  useEffect(() => {
+    try {
+      const detailCache = (globalThis as any).__fs_history_detail_cache as Record<string, unknown> | undefined
+      const cached = detailCache?.[id] as any
+      if (cached && !experiment) {
+        const exp = (cached as any).experiment || cached
+        setExperiment({
+          id: String(exp.id ?? id),
+          state: String(exp.state ?? "running") as LiveExperiment["state"],
+          phase: String(exp.phase ?? "baseline") as LiveExperiment["phase"],
+          faultType: String(exp.fault_type ?? "unknown"),
+          currentIntensity: typeof exp.current_intensity === "number" ? exp.current_intensity : undefined,
+          maxIntensity: typeof exp.max_intensity === "number" ? exp.max_intensity : undefined,
+          createdAt: typeof exp.created_at === "string" ? exp.created_at : undefined,
+          updatedAt: typeof exp.updated_at === "string" ? exp.updated_at : undefined,
+          targets: Array.isArray(exp.targets) ? exp.targets : undefined,
+        })
+        setMetrics({ kind: "backend", data: cached as any })
+        setMetricsSource("status")
+        setConnection("active")
+        setLastUpdatedAt(Date.now())
+      }
+    } catch {}
+  }, [id])
+
+  // SWR-driven live polling
+  const swrKey = `live:${id}:${platform}`
+  const swrFetcher = async () => {
+    if (platform === "frontend") {
+      const statusRes = await getFrontendExperimentStatus(id)
+      let metrics: any = null
+      try { metrics = await getFrontendMetricsReport(id) } catch {}
+      return { status: statusRes, metrics, metricsSource: metrics ? "report" : "status" }
+    }
+
+    if (platform === "backend") {
+      const statusRes = await getBackendExperimentStatus(id)
+      let metrics: any = null
+      try { metrics = await getBackendMetricsReport(id) } catch {}
+      return { status: statusRes, metrics: metrics ?? statusRes, metricsSource: metrics ? "report" : "status" }
+    }
+
+    const statusRes = await getAndroidExperimentStatus(id)
+    let metrics: any = null
+    try { metrics = await getAndroidMetricsReport(id) } catch {}
+    return { status: statusRes, metrics: metrics ?? statusRes, metricsSource: metrics ? "report" : "status" }
+  }
+
+  const { data: swrData, error: swrError, isLoading: swrLoading } = useSWR(swrKey, swrFetcher, {
+    refreshInterval: 3500,
+    dedupingInterval: 2000,
+    revalidateOnFocus: false,
+  })
+
   useEffect(() => {
     setInitialFetchComplete(false)
-    const fetchCurrent = async () => {
-      try {
-        let nextExperiment: LiveExperiment | null = null
+    if (!swrData && swrLoading) {
+      setLoading(true)
+      return
+    }
+
+    try {
+      if (swrData) {
+        const statusRes = (swrData as any).status
+        const metricsPayload = (swrData as any).metrics
 
         if (platform === "frontend") {
-          const statusRes = await getFrontendExperimentStatus(id)
-          nextExperiment = {
+          setExperiment({
             id: statusRes.experiment.id,
             state: statusRes.experiment.state,
             phase: statusRes.experiment.phase,
@@ -722,21 +782,12 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
             createdAt: statusRes.experiment.created_at,
             updatedAt: statusRes.experiment.updated_at,
             targets: [],
-          }
-          setExperiment(nextExperiment)
-
-          try {
-            const reportRes = await getFrontendMetricsReport(id)
-            setMetrics({ kind: "frontend", data: reportRes })
-          } catch (metricsError) {
-            console.warn("⚠️ Frontend metrics not ready yet:", metricsError)
-          }
+          })
+          if (metricsPayload) setMetrics({ kind: "frontend", data: metricsPayload })
         } else if (platform === "backend") {
-          const statusRes = await getBackendExperimentStatus(id)
           const statusRecord = statusRes as unknown as Record<string, unknown>
           const statusExperiment = asRecord((statusRecord as { experiment?: unknown }).experiment)
-          console.log("📡 Backend status response:", statusRes)
-          nextExperiment = {
+          setExperiment({
             id: statusRes.experiment.id,
             state: statusRes.experiment.state,
             phase: statusRes.experiment.phase,
@@ -748,27 +799,11 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
             createdAt: typeof statusExperiment.created_at === "string" ? statusExperiment.created_at : new Date().toISOString(),
             updatedAt: typeof statusExperiment.updated_at === "string" ? statusExperiment.updated_at : undefined,
             targets: safeStringArray(statusExperiment.targets),
-          }
-          setExperiment(nextExperiment)
-          setMetrics({ kind: "backend", data: statusRes as unknown as Awaited<ReturnType<typeof getBackendMetricsReport>> })
-
-          if (statusRes.experiment.state === "completed" || statusRes.experiment.state === "failed") {
-            try {
-              const reportRes = await getBackendMetricsReport(id)
-              console.log("📊 Backend metrics response:", reportRes)
-              const merged = {
-                ...(statusRes as unknown as Record<string, unknown>),
-                ...(reportRes as unknown as Record<string, unknown>),
-              }
-              setMetrics({ kind: "backend", data: merged as Awaited<ReturnType<typeof getBackendMetricsReport>> })
-            } catch (metricsError) {
-              console.warn("⚠️ Backend metrics not ready yet:", metricsError)
-            }
-          }
+          })
+          if (metricsPayload) setMetrics({ kind: "backend", data: metricsPayload })
         } else {
-          const statusRes = await getAndroidExperimentStatus(id)
           const statusAndroid = normalizeAndroidStatus(statusRes)
-          nextExperiment = {
+          setExperiment({
             id: statusAndroid.id || id,
             state: statusAndroid.state,
             phase: statusAndroid.phase,
@@ -798,53 +833,34 @@ export default function LiveExperimentPage({ params }: { params: Promise<{ id: s
             impactObserved: statusAndroid.impactObserved,
             recoveryObserved: statusAndroid.recoveryObserved,
             validationPassed: statusAndroid.validationPassed,
-          }
-          setExperiment(nextExperiment)
-
-          try {
-            const reportRes = await getAndroidMetricsReport(id)
-            console.log("📊 Android metrics response (raw):", reportRes)
-            const merged = {
-              ...(statusRes as unknown as Record<string, unknown>),
-              ...(reportRes as unknown as Record<string, unknown>),
-            }
-            setMetrics({ kind: "android", data: normalizeAndroidMetrics(merged) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
-            setMetricsSource("report")
-          } catch (metricsError) {
-            console.warn("⚠️ Android metrics not ready as a separate report, falling back to status payload:", metricsError)
+          })
+          if (metricsPayload) {
             try {
-              setMetrics({ kind: "android", data: normalizeAndroidMetrics(statusRes as unknown as Record<string, unknown>) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
-              setMetricsSource("status")
-            } catch (e) {
-              console.warn("⚠️ Failed to normalize Android metrics from status payload:", e)
+              setMetrics({ kind: "android", data: normalizeAndroidMetrics(metricsPayload) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
+              setMetricsSource("report")
+            } catch {
+              try {
+                setMetrics({ kind: "android", data: normalizeAndroidMetrics(statusRes as unknown as Record<string, unknown>) as Awaited<ReturnType<typeof getAndroidMetricsReport>> })
+                setMetricsSource("status")
+              } catch {}
             }
           }
         }
+
         setConnection("active")
         setLastUpdatedAt(Date.now())
         setErrorMessage(null)
-      } catch (error) {
-        const parsed = parseError(error)
-        console.error("❌ Polling error:", parsed.message, error)
-        setConnection("disconnected")
-        setErrorMessage(parsed.message)
-      } finally {
-        setInitialFetchComplete(true)
       }
+    } catch (e) {
+      const parsed = parseError(e)
+      console.error("❌ Live fetch error:", parsed.message, e)
+      setConnection("disconnected")
+      setErrorMessage(parsed.message)
+    } finally {
+      setInitialFetchComplete(true)
+      setLoading(false)
     }
-
-    const poller = new Poller({
-      intervalMs: 3500,
-      hiddenIntervalMs: 7000,
-      onTick: fetchCurrent,
-      onStateChange: setConnection,
-    })
-
-    fetchCurrent().catch(() => undefined)
-    poller.start()
-
-    return () => poller.stop()
-  }, [id, platform])
+  }, [swrData, swrError, swrLoading, id, platform])
 
   const dataState = useMemo(() => {
     if (!initialFetchComplete) return "initial_loading" as const

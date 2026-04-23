@@ -50,11 +50,35 @@ function LogsPageContent() {
   const [follow, setFollow] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [endpoint, setEndpoint] = useState(searchParams.get("endpoint") ?? "")
-  const [status, setStatus] = useState(searchParams.get("status") ?? "")
-  const [timeRange, setTimeRange] = useState(searchParams.get("timeRange") ?? "1h")
-  const [experimentId, setExperimentId] = useState(searchParams.get("id") ?? "")
-  const [query, setQuery] = useState(searchParams.get("q") ?? "")
+  // session persistence keys + module cache
+  const LOGS_STATE_KEY = "fs:logs:state"
+  const LOGS_CACHE_KEY = "fs:logs:cache"
+
+  function readSessionCache<T>(key: string): T | null {
+    try {
+      if (typeof sessionStorage === "undefined") return null
+      const raw = sessionStorage.getItem(key)
+      if (!raw) return null
+      return JSON.parse(raw) as T
+    } catch {
+      return null
+    }
+  }
+
+  function writeSessionCache<T>(key: string, value: T) {
+    try {
+      if (typeof sessionStorage === "undefined") return
+      sessionStorage.setItem(key, JSON.stringify(value))
+    } catch {}
+  }
+
+  const savedState = readSessionCache<{ endpoint?: string; status?: string; timeRange?: string; id?: string; q?: string }>(LOGS_STATE_KEY) || {}
+
+  const [endpoint, setEndpoint] = useState<string>(searchParams.get("endpoint") ?? savedState.endpoint ?? "")
+  const [status, setStatus] = useState<string>(searchParams.get("status") ?? savedState.status ?? "")
+  const [timeRange, setTimeRange] = useState<string>(searchParams.get("timeRange") ?? savedState.timeRange ?? "1h")
+  const [experimentId, setExperimentId] = useState<string>(searchParams.get("id") ?? savedState.id ?? "")
+  const [query, setQuery] = useState<string>(searchParams.get("q") ?? savedState.q ?? "")
   const [levelFilters, setLevelFilters] = useState<Record<string, boolean>>({
     error: true,
     warn: true,
@@ -63,8 +87,15 @@ function LogsPageContent() {
   })
   const [isFetching, setIsFetching] = useState(false)
   const [showLoading, setShowLoading] = useState(false)
+  const isMountedRef = useRef(true)
   const { toast } = useToast()
   const loadingToastRef = useRef<ReturnType<typeof toast> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const updateUrl = useCallback((next: { endpoint?: string; status?: string; timeRange?: string; q?: string; id?: string }) => {
     const params = new URLSearchParams(searchParams.toString())
@@ -82,27 +113,51 @@ function LogsPageContent() {
   }, [router, searchParams])
 
   const fetchLogs = useCallback(async () => {
+    if (!isMountedRef.current) return
     setIsFetching(true)
     let timer: ReturnType<typeof setTimeout> | null = null
-    timer = setTimeout(() => setShowLoading(true), 700)
+    timer = setTimeout(() => { if (isMountedRef.current) setShowLoading(true) }, 700)
     try {
       const data = await getLogs({ endpoint, status, timeRange, experimentId })
+      if (!isMountedRef.current) return
       setError(null)
-      setLogs(data.slice(-config.MAX_LOG_ENTRIES))
+      const trimmed = data.slice(-config.MAX_LOG_ENTRIES)
+      setLogs(trimmed)
+      // Persist into module-level cache and sessionStorage so UI can hydrate quickly
+      try {
+        const cacheKey = `${endpoint}:${status}:${timeRange}:${experimentId}:${query}`
+        const existing = (globalThis as any).__fs_logs_cache || readSessionCache<Record<string, LogEntry[]>>(LOGS_CACHE_KEY) || {}
+        existing[cacheKey] = trimmed
+        ;(globalThis as any).__fs_logs_cache = existing
+        writeSessionCache(LOGS_CACHE_KEY, existing)
+      } catch {}
     } catch (err) {
       const parsed = parseError(err)
-      setError(parsed.message)
-      throw err
+      if (isMountedRef.current) setError(parsed.message)
+      // swallow to avoid unhandled rejections — UI shows error and allows Retry
     } finally {
       if (timer) clearTimeout(timer)
-      setShowLoading(false)
-      setIsFetching(false)
+      if (isMountedRef.current) {
+        setShowLoading(false)
+        setIsFetching(false)
+      }
     }
   }, [endpoint, status, timeRange, experimentId])
 
   useEffect(() => {
+    // hydrate from module cache to avoid empty flash on navigation
+    try {
+      const cacheKey = `${endpoint}:${status}:${timeRange}:${experimentId}:${query}`
+      const globalCache = (globalThis as any).__fs_logs_cache || readSessionCache<Record<string, LogEntry[]>>(LOGS_CACHE_KEY) || {}
+      ;(globalThis as any).__fs_logs_cache = globalCache
+      const cached = globalCache[cacheKey]
+      if (cached && cached.length) {
+        setLogs(cached)
+        setError(null)
+      }
+    } catch {}
     fetchLogs().catch(() => {})
-  }, [fetchLogs])
+  }, [endpoint, status, timeRange, experimentId, query])
 
   // Show a snackbar/toast if the initial fetch is slow
   useEffect(() => {
@@ -241,25 +296,46 @@ function LogsPageContent() {
 
   // fetch list of recent experiments to populate a selector for quick navigation
   const [experimentsList, setExperimentsList] = useState<Array<{ id: string; target_type: string; label?: string }>>([])
+  const [experimentsLoading, setExperimentsLoading] = useState(false)
+  const [experimentsError, setExperimentsError] = useState<string | null>(null)
+
+  const loadExperiments = useCallback(async () => {
+    setExperimentsLoading(true)
+    setExperimentsError(null)
+    try {
+      const { getExperimentHistory } = await import('@/lib/api')
+      const resp = await getExperimentHistory({ limit: 20 })
+      const backendExps = resp.items
+        .filter((it) => it.experiment.target_type === "backend")
+        .map((it) => {
+          const id = String(it.experiment?.id ?? "")
+          return { id, target_type: it.experiment.target_type, label: `${id.slice(0, 8)}${id.length > 8 ? '…' : ''}` }
+        })
+      setExperimentsList(backendExps)
+      // If no experiment id is present in the URL, select the first backend experiment
+      if (!searchParams.get('id') && backendExps.length) {
+        const first = backendExps[0].id
+        setExperimentId(first)
+        updateUrl({ endpoint, status, timeRange, q: query, id: first })
+      }
+    } catch (err) {
+      const parsed = parseError(err)
+      setExperimentsError(parsed.message)
+    } finally {
+      setExperimentsLoading(false)
+    }
+  }, [searchParams, updateUrl, endpoint, status, timeRange, query])
+
   useEffect(() => {
-    import('@/lib/api').then(({ getExperimentHistory }) => {
-      getExperimentHistory({ limit: 20 }).then((resp) => {
-        const backendExps = resp.items
-          .filter((it) => it.experiment.target_type === "backend")
-          .map((it) => {
-            const id = String(it.experiment?.id ?? "")
-            return { id, target_type: it.experiment.target_type, label: `${id.slice(0, 8)}${id.length > 8 ? '…' : ''}` }
-          })
-        setExperimentsList(backendExps)
-        // If no experiment id is present in the URL, select the first backend experiment
-        if (!searchParams.get('id') && backendExps.length) {
-          const first = backendExps[0].id
-          setExperimentId(first)
-          updateUrl({ endpoint, status, timeRange, q: query, id: first })
-        }
-      }).catch(() => {})
-    })
-  }, [])
+    loadExperiments().catch(() => {})
+  }, [loadExperiments])
+
+  // persist UI filter state to sessionStorage
+  useEffect(() => {
+    try {
+      writeSessionCache(LOGS_STATE_KEY, { endpoint, status, timeRange, id: experimentId, q: query })
+    } catch {}
+  }, [endpoint, status, timeRange, experimentId, query])
 
   const filtered = useMemo(() => {
     return logs.filter((entry) => {
@@ -407,13 +483,30 @@ function LogsPageContent() {
                   </Select>
 
                   <div className="min-w-[160px]">
-                    <Select value={experimentId || "all"} onValueChange={(val) => { const next = val === "all" ? "" : val; setExperimentId(next); updateUrl({ endpoint, timeRange, q: query, id: next }) }}>
+                    <Select value={experimentId || "all"} onValueChange={(val) => {
+                      if (val === '__retry') {
+                        loadExperiments().catch(() => {})
+                        return
+                      }
+                      const next = val === "all" ? "" : val
+                      setExperimentId(next)
+                      updateUrl({ endpoint, timeRange, q: query, id: next })
+                    }}>
                       <SelectTrigger className="w-full sm:w-44"><SelectValue placeholder="Experiment" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Experiments</SelectItem>
-                        {experimentsList.map((exp) => (
-                          <SelectItem key={exp.id} value={exp.id} title={exp.id}>{exp.label ?? exp.id}</SelectItem>
-                        ))}
+                        {experimentsLoading ? (
+                          <SelectItem value="__loading" disabled>Loading...</SelectItem>
+                        ) : experimentsError ? (
+                          <>
+                            <SelectItem value="__none" disabled>No experiments</SelectItem>
+                            <SelectItem value="__retry">Retry loading experiments</SelectItem>
+                          </>
+                        ) : (
+                          experimentsList.map((exp) => (
+                            <SelectItem key={exp.id} value={exp.id} title={exp.id}>{exp.label ?? exp.id}</SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -470,7 +563,15 @@ function LogsPageContent() {
             <CardContent>
               {filtered.length === 0 ? (
                 <div className="py-8 text-center">
-                  {logs.length === 0 ? (
+                  {isFetching && logs.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      <p className="text-sm text-muted-foreground">Loading logs…</p>
+                      <div>
+                        <Button size="sm" variant="ghost" onClick={() => fetchLogs().catch(() => {})}>Retry</Button>
+                      </div>
+                    </div>
+                  ) : logs.length === 0 ? (
                     <div className="flex flex-col items-center gap-2">
                       <p className="text-sm text-muted-foreground">No logs available</p>
                       <p className="text-xs text-muted-foreground">Logs will appear here when experiments run</p>

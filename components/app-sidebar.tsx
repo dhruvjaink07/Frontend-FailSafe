@@ -20,22 +20,27 @@ import { clearAuthToken } from "@/lib/security/auth"
 import { cn } from "@/lib/utils"
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Experiments", href: "/experiments", icon: FlaskConical },
+  { name: "Insights", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Experiments", href: "/experiments/create", icon: FlaskConical },
   { name: "History", href: "/experiments/history", icon: History },
   { name: "Logs", href: "/logs", icon: ScrollText },
   { name: "Environment", href: "/environment", icon: Server },
-  { name: "ML Insights", href: "/ml-insights", icon: Brain },
+  // ML Insights moved into Dashboard; removed standalone navigation entry
   { name: "Documentation", href: "/docs", icon: BookOpen },
 ]
 
 export function AppSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const activeHref =
+  let activeHref =
     navigation
       .filter((item) => pathname === item.href || pathname.startsWith(item.href + "/"))
       .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null
+
+  // Keep the Experiments item active for any /experiments subpath
+  if (!activeHref && pathname?.startsWith("/experiments")) {
+    activeHref = "/experiments/create"
+  }
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar">
@@ -88,20 +93,6 @@ export function AppSidebar() {
               <Settings className="h-4 w-4" />
               Settings
             </Link>
-
-            <button
-              onClick={async () => {
-                try { await fetch("/api/auth/signout", { method: "POST" }) } catch {}
-                try { clearAuthToken() } catch {}
-                router.push("/signin")
-              }}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              )}
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
           </div>
         </div>
       </div>
